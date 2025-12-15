@@ -1,195 +1,272 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Eye, Download, Trash2, FileText } from "lucide-react";
+import {
+  UploadCloud,
+  FileText,
+  Download,
+  Trash2,
+  Eye,
+  Search,
+  Grid,
+  List,
+} from "lucide-react";
 
+/* ---------------- Employee ---------------- */
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
-const LS_KEY = (empId) => `HRMS_EMP_DOCS_${empId}`;
+const LS_KEY = (id) => `HRMS_EMP_DOCS_${id}`;
 
-function loadDocs(empId) {
+/* ---------------- Utils ---------------- */
+const loadDocs = (id) => {
   try {
-    const raw = localStorage.getItem(LS_KEY(empId));
+    const raw = localStorage.getItem(LS_KEY(id));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
-}
+};
 
-function saveDocs(empId, rows) {
-  localStorage.setItem(LS_KEY(empId), JSON.stringify(rows));
-}
+const saveDocs = (id, docs) => {
+  localStorage.setItem(LS_KEY(id), JSON.stringify(docs));
+};
 
-function uid(prefix = "DOC") {
-  return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
-}
-
-function fmtBytes(bytes) {
-  if (!bytes && bytes !== 0) return "—";
+const formatBytes = (bytes) => {
+  if (!bytes && bytes !== 0) return "-";
   const sizes = ["B", "KB", "MB", "GB"];
-  let i = 0;
-  let n = bytes;
-  while (n >= 1024 && i < sizes.length - 1) {
-    n /= 1024;
-    i++;
-  }
-  return `${n.toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`;
-}
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1);
+  const val = bytes / Math.pow(1024, i);
+  return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
+};
 
+const getFileType = (file) => {
+  const t = file?.type || "";
+  if (t.includes("pdf")) return "PDF";
+  if (t.includes("image")) return "IMAGE";
+  if (t.includes("word")) return "WORD";
+  if (t.includes("excel")) return "EXCEL";
+  return "FILE";
+};
+
+const badgeColor = (type) => {
+  if (type === "PDF") return "bg-red-50 text-red-700";
+  if (type === "IMAGE") return "bg-blue-50 text-blue-700";
+  if (type === "WORD") return "bg-indigo-50 text-indigo-700";
+  if (type === "EXCEL") return "bg-green-50 text-green-700";
+  return "bg-gray-100 text-gray-700";
+};
+
+/* ---------------- Component ---------------- */
 export default function EmployeeDocuments() {
   const fileRef = useRef(null);
-  const [rows, setRows] = useState(() => loadDocs(EMP.id));
-  const [busy, setBusy] = useState(false);
+
+  const [docs, setDocs] = useState(() => loadDocs(EMP.id));
+  const [file, setFile] = useState(null);
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("Offer Letter");
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState("table");
 
   useEffect(() => {
-    saveDocs(EMP.id, rows);
-  }, [rows]);
+    saveDocs(EMP.id, docs);
+  }, [docs]);
 
-  const totalSize = useMemo(() => rows.reduce((sum, r) => sum + (r.size || 0), 0), [rows]);
-
-  const handlePick = () => fileRef.current?.click();
-
-  const handleUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setBusy(true);
-    try {
-      // store as base64 (demo). For real app, upload to server/Supabase Storage.
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      const doc = {
-        id: uid("DOC"),
-        employeeId: EMP.id,
-        employeeName: EMP.name,
-        name: file.name,
-        type: file.type || "unknown",
-        size: file.size,
-        uploadedAt: new Date().toISOString(),
-        dataUrl,
-      };
-
-      setRows((prev) => [doc, ...prev]);
-    } finally {
-      setBusy(false);
-      e.target.value = "";
-    }
+  /* ---------------- Actions ---------------- */
+  const pickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.[^/.]+$/, ""));
   };
 
-  const handleView = (doc) => {
-    if (!doc.dataUrl) return;
-    window.open(doc.dataUrl, "_blank", "noopener,noreferrer");
+  const upload = async () => {
+    if (!file || !title) return alert("Title & file required");
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const doc = {
+      id: crypto.randomUUID(),
+      title,
+      category,
+      fileName: file.name,
+      size: file.size,
+      type: getFileType(file),
+      uploadedAt: new Date().toISOString(),
+      dataUrl,
+    };
+
+    setDocs((p) => [doc, ...p]);
+    setFile(null);
+    setTitle("");
+    fileRef.current.value = "";
   };
 
-  const handleDownload = (doc) => {
-    if (!doc.dataUrl) return;
-
+  const remove = (id) => setDocs((p) => p.filter((d) => d.id !== id));
+  const viewDoc = (d) => window.open(d.dataUrl, "_blank");
+  const downloadDoc = (d) => {
     const a = document.createElement("a");
-    a.href = doc.dataUrl;
-    a.download = doc.name || "document";
-    document.body.appendChild(a);
+    a.href = d.dataUrl;
+    a.download = d.fileName;
     a.click();
-    document.body.removeChild(a);
   };
 
-  const handleDelete = (id) => setRows((prev) => prev.filter((r) => r.id !== id));
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return docs.filter(
+      (d) =>
+        d.title.toLowerCase().includes(q) ||
+        d.fileName.toLowerCase().includes(q)
+    );
+  }, [docs, search]);
 
+  /* ---------------- UI ---------------- */
   return (
-    <div className="space-y-6">
-      <div className="bg-white border rounded-2xl p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-extrabold text-gray-900">Documents</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Upload & view your documents • Total:{" "}
-              <span className="font-semibold">{rows.length}</span> • Size:{" "}
-              <span className="font-semibold">{fmtBytes(totalSize)}</span>
-            </p>
-          </div>
-
-          <div>
-            <input ref={fileRef} type="file" className="hidden" onChange={handleUpload} />
-            <button
-              onClick={handlePick}
-              disabled={busy}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                busy
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-purple-700 text-white hover:bg-purple-800"
-              }`}
-            >
-              <Upload size={18} />
-              {busy ? "Uploading..." : "Upload Document"}
-            </button>
-          </div>
+    <section className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">My Documents</h1>
+          <p className="text-sm text-gray-500">
+            Personal & HR documents for {EMP.name}
+          </p>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-dashed border-gray-300 p-6 text-gray-500 text-sm">
-          <div className="flex items-start gap-3">
-            <FileText className="mt-0.5" size={18} />
-            <div>
-              <p className="font-semibold text-gray-800">Document Repository</p>
-              <p className="mt-1">
-                Offer letters • Payslips • Appointment/confirmation letters • HR policies •
-                Download & view • Role-based access (later)
-              </p>
-            </div>
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setView("table")}
+            className={`p-2 rounded-lg border ${
+              view === "table" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
+          >
+            <List size={16} />
+          </button>
+          <button
+            onClick={() => setView("grid")}
+            className={`p-2 rounded-lg border ${
+              view === "grid" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
+          >
+            <Grid size={16} />
+          </button>
         </div>
       </div>
 
-      <div className="bg-white border rounded-2xl p-6">
-        <h3 className="text-lg font-extrabold text-gray-900">Uploaded Files</h3>
+      {/* Upload Box */}
+      <div className="bg-white rounded-2xl border shadow-sm p-6">
+        <div
+          onClick={() => fileRef.current.click()}
+          className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-blue-500 transition"
+        >
+          <UploadCloud className="mx-auto text-blue-600" />
+          <p className="font-semibold mt-2">Click to upload document</p>
+          <p className="text-xs text-gray-500">PDF, Image, Word, Excel</p>
+        </div>
 
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-500 border-b">
-                <th className="py-3 pr-3">File Name</th>
-                <th className="py-3 pr-3">Type</th>
-                <th className="py-3 pr-3">Size</th>
-                <th className="py-3 pr-3">Uploaded</th>
-                <th className="py-3 pr-3">Actions</th>
+        {file && (
+          <div className="mt-4 flex items-center justify-between bg-gray-50 p-3 rounded-xl">
+            <div>
+              <div className="font-medium">{file.name}</div>
+              <div className="text-xs text-gray-500">
+                {formatBytes(file.size)}
+              </div>
+            </div>
+            <button onClick={() => setFile(null)} className="text-xs underline">
+              Remove
+            </button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Document title"
+            className="rounded-xl border px-3 py-2 text-sm"
+          />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="rounded-xl border px-3 py-2 text-sm"
+          >
+            <option>Offer Letter</option>
+            <option>Payslip</option>
+            <option>Appointment Letter</option>
+            <option>HR Policy</option>
+            <option>Other</option>
+          </select>
+          <button
+            onClick={upload}
+            className="rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700"
+          >
+            Upload Document
+          </button>
+        </div>
+
+        <input type="file" ref={fileRef} className="hidden" onChange={pickFile} />
+      </div>
+
+      {/* Search */}
+      <div className="flex items-center gap-2">
+        <Search size={16} className="text-gray-400" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search documents..."
+          className="w-full md:w-72 rounded-xl border px-3 py-2 text-sm"
+        />
+      </div>
+
+      {/* TABLE VIEW */}
+      {view === "table" && (
+        <div className="bg-white rounded-2xl border overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Document</th>
+                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Size</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {rows.length === 0 ? (
+            <tbody className="divide-y">
+              {filtered.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-gray-500" colSpan={5}>
-                    No documents uploaded yet.
+                  <td colSpan={4} className="text-center py-10 text-gray-500">
+                    No documents found
                   </td>
                 </tr>
               ) : (
-                rows.map((d) => (
-                  <tr key={d.id} className="border-b last:border-b-0">
-                    <td className="py-3 pr-3 font-semibold text-gray-900">{d.name}</td>
-                    <td className="py-3 pr-3">{d.type}</td>
-                    <td className="py-3 pr-3">{fmtBytes(d.size)}</td>
-                    <td className="py-3 pr-3">{new Date(d.uploadedAt).toLocaleString()}</td>
-                    <td className="py-3 pr-3">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleView(d)}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-900 text-xs font-semibold transition"
+                filtered.map((d) => (
+                  <tr key={d.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div className="flex gap-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
+                            d.type
+                          )}`}
                         >
+                          {d.type}
+                        </span>
+                        <div>
+                          <div className="font-semibold">{d.title}</div>
+                          <div className="text-xs text-gray-500">{d.fileName}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">{d.category}</td>
+                    <td className="px-4 py-3">{formatBytes(d.size)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => viewDoc(d)}>
                           <Eye size={16} />
-                          View
                         </button>
-                        <button
-                          onClick={() => handleDownload(d)}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold transition"
-                        >
+                        <button onClick={() => downloadDoc(d)}>
                           <Download size={16} />
-                          Download
                         </button>
-                        <button
-                          onClick={() => handleDelete(d.id)}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition"
-                        >
-                          <Trash2 size={16} />
-                          Delete
+                        <button onClick={() => remove(d.id)}>
+                          <Trash2 size={16} className="text-red-600" />
                         </button>
                       </div>
                     </td>
@@ -199,11 +276,43 @@ export default function EmployeeDocuments() {
             </tbody>
           </table>
         </div>
+      )}
 
-        <p className="mt-3 text-xs text-gray-500">
-          Note: This demo stores files as base64 in localStorage (ok for small files only).
-        </p>
-      </div>
-    </div>
+      {/* GRID VIEW */}
+      {view === "grid" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map((d) => (
+            <div key={d.id} className="bg-white border rounded-2xl p-4 shadow-sm">
+              <span
+                className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
+                  d.type
+                )}`}
+              >
+                {d.type}
+              </span>
+              <h3 className="font-semibold truncate">{d.title}</h3>
+              <p className="text-xs text-gray-500 truncate">{d.fileName}</p>
+              <p className="text-xs mt-1">{formatBytes(d.size)}</p>
+
+              <div className="flex justify-end gap-3 mt-4">
+                <button onClick={() => viewDoc(d)}>
+                  <Eye size={16} />
+                </button>
+                <button onClick={() => downloadDoc(d)}>
+                  <Download size={16} />
+                </button>
+                <button onClick={() => remove(d.id)}>
+                  <Trash2 size={16} className="text-red-600" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400">
+        Demo only – employee documents stored locally.
+      </p>
+    </section>
   );
 }

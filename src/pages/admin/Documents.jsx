@@ -1,5 +1,16 @@
 import { useMemo, useRef, useState } from "react";
+import {
+  UploadCloud,
+  FileText,
+  Download,
+  Trash2,
+  Eye,
+  Search,
+  Grid,
+  List,
+} from "lucide-react";
 
+/* ---------------- Utils ---------------- */
 const formatBytes = (bytes) => {
   if (!bytes && bytes !== 0) return "-";
   const sizes = ["B", "KB", "MB", "GB"];
@@ -8,347 +19,259 @@ const formatBytes = (bytes) => {
   return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
 };
 
-const formatDateTime = (d) => {
-  const dt = new Date(d);
-  const date = dt.toLocaleDateString();
-  const time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return { date, time };
-};
-
-const getFileTypeLabel = (file) => {
+const getFileType = (file) => {
   const t = file?.type || "";
   if (t.includes("pdf")) return "PDF";
-  if (t.includes("image")) return "Image";
-  if (t.includes("word")) return "Word";
-  if (t.includes("spreadsheet") || t.includes("excel")) return "Excel";
-  if (t.includes("zip")) return "ZIP";
-  return (file?.name?.split(".").pop() || "FILE").toUpperCase();
+  if (t.includes("image")) return "IMAGE";
+  if (t.includes("word")) return "WORD";
+  if (t.includes("excel")) return "EXCEL";
+  return "FILE";
 };
 
-const badgeClass = (label) => {
-  const base = "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border";
-  if (label === "PDF") return `${base} bg-red-50 text-red-700 border-red-200`;
-  if (label === "Image") return `${base} bg-blue-50 text-blue-700 border-blue-200`;
-  if (label === "Word") return `${base} bg-indigo-50 text-indigo-700 border-indigo-200`;
-  if (label === "Excel") return `${base} bg-green-50 text-green-700 border-green-200`;
-  return `${base} bg-gray-50 text-gray-700 border-gray-200`;
+const badgeColor = (type) => {
+  if (type === "PDF") return "bg-red-50 text-red-700";
+  if (type === "IMAGE") return "bg-blue-50 text-blue-700";
+  if (type === "WORD") return "bg-indigo-50 text-indigo-700";
+  if (type === "EXCEL") return "bg-green-50 text-green-700";
+  return "bg-gray-100 text-gray-700";
 };
 
-const Documents = () => {
+/* ---------------- Component ---------------- */
+export default function Documents() {
   const fileRef = useRef(null);
 
-  // form fields
+  const [docs, setDocs] = useState([]);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("Offer Letter");
-  const [pickedFile, setPickedFile] = useState(null);
-
-  // list
-  const [docs, setDocs] = useState([]);
-
-  // filters
+  const [file, setFile] = useState(null);
   const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState("All");
+  const [view, setView] = useState("table"); // table | grid
 
-  const filteredDocs = useMemo(() => {
-    let list = [...docs];
-
-    if (catFilter !== "All") list = list.filter((d) => d.category === catFilter);
-
-    const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        (d) =>
-          d.title.toLowerCase().includes(q) ||
-          d.fileName.toLowerCase().includes(q) ||
-          d.category.toLowerCase().includes(q)
-      );
-    }
-
-    // latest first
-    list.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-    return list;
-  }, [docs, search, catFilter]);
-
-  const onPickFile = (e) => {
+  /* ---------------- Actions ---------------- */
+  const pickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    setPickedFile(f);
-    if (!title.trim()) setTitle(f.name.replace(/\.[^/.]+$/, "")); // default title from filename
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.[^/.]+$/, ""));
   };
 
-  const clearForm = () => {
-    setTitle("");
-    setCategory("Offer Letter");
-    setPickedFile(null);
-    if (fileRef.current) fileRef.current.value = "";
-  };
-
-  const uploadDoc = () => {
-    if (!pickedFile) return alert("Please choose a file to upload.");
-    if (!title.trim()) return alert("Please enter a document title.");
-
-    const now = new Date().toISOString();
-
-    const url = URL.createObjectURL(pickedFile); // local preview url
-
-    const newDoc = {
-      id: crypto?.randomUUID ? crypto.randomUUID() : `DOC-${Date.now()}`,
-      title: title.trim(),
+  const upload = () => {
+    if (!file || !title) return alert("Title & file required");
+    const doc = {
+      id: crypto.randomUUID(),
+      title,
       category,
-      fileName: pickedFile.name,
-      fileType: pickedFile.type,
-      typeLabel: getFileTypeLabel(pickedFile),
-      size: pickedFile.size,
-      uploadedAt: now,
-      url,
+      fileName: file.name,
+      size: file.size,
+      type: getFileType(file),
+      url: URL.createObjectURL(file),
+      date: new Date().toLocaleString(),
     };
-
-    setDocs((prev) => [newDoc, ...prev]);
-    clearForm();
+    setDocs((p) => [doc, ...p]);
+    setTitle("");
+    setFile(null);
+    fileRef.current.value = "";
   };
 
-  const removeDoc = (id) => {
-    setDocs((prev) => {
-      const target = prev.find((d) => d.id === id);
-      if (target?.url) URL.revokeObjectURL(target.url);
-      return prev.filter((d) => d.id !== id);
-    });
-  };
+  const remove = (id) => setDocs((p) => p.filter((d) => d.id !== id));
 
-  const downloadDoc = (doc) => {
-    const a = document.createElement("a");
-    a.href = doc.url;
-    a.download = doc.fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  };
+  const filtered = useMemo(() => {
+    return docs.filter(
+      (d) =>
+        d.title.toLowerCase().includes(search.toLowerCase()) ||
+        d.fileName.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [docs, search]);
 
+  /* ---------------- UI ---------------- */
   return (
-    <section className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Document Repository</h1>
-        <p className="text-sm text-gray-600">
-          Store and manage employee-related documents like offer letters, payslips, and policy files.
-        </p>
-      </div>
-
-      {/* Upload Card */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Upload Document</h2>
-            <p className="text-xs text-gray-500">Add a title, choose category and upload the file.</p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-white
-                       bg-blue-600 hover:bg-blue-700 transition"
-          >
-            Choose File
-          </button>
+    <section className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Document Management</h1>
+          <p className="text-sm text-gray-500">
+            Securely upload, manage & download employee documents
+          </p>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Document Title</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: Offer Letter - Priya"
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none
-                         focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
-            />
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setView("table")}
+            className={`p-2 rounded-lg border ${
+              view === "table" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
+          >
+            <List size={16} />
+          </button>
+          <button
+            onClick={() => setView("grid")}
+            className={`p-2 rounded-lg border ${
+              view === "grid" ? "bg-blue-600 text-white" : "bg-white"
+            }`}
+          >
+            <Grid size={16} />
+          </button>
+        </div>
+      </div>
 
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none
-                         focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
-            >
-              <option>Offer Letter</option>
-              <option>Payslip</option>
-              <option>Appointment Letter</option>
-              <option>Confirmation Letter</option>
-              <option>HR Policy</option>
-              <option>Other</option>
-            </select>
-          </div>
+      {/* Upload Box */}
+      <div className="bg-white rounded-2xl border shadow-sm p-6">
+        <div
+          onClick={() => fileRef.current.click()}
+          className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-blue-500 transition"
+        >
+          <UploadCloud className="mx-auto text-blue-600" />
+          <p className="font-semibold mt-2">Click to upload document</p>
+          <p className="text-xs text-gray-500">PDF, Image, Word, Excel</p>
+        </div>
 
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Selected File</label>
-            <div className="w-full rounded-xl border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-600 bg-gray-50">
-              {pickedFile ? (
-                <div className="flex items-center justify-between gap-3">
-                  <div className="truncate">
-                    <div className="font-medium truncate">{pickedFile.name}</div>
-                    <div className="text-xs text-gray-500">
-                      {formatBytes(pickedFile.size)} • {getFileTypeLabel(pickedFile)}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={clearForm}
-                    className="px-3 py-1.5 rounded-lg text-xs border bg-white hover:bg-gray-50"
-                  >
-                    Clear
-                  </button>
-                </div>
-              ) : (
-                "No file selected"
-              )}
+        {file && (
+          <div className="mt-4 flex items-center justify-between bg-gray-50 p-3 rounded-xl">
+            <div>
+              <div className="font-medium">{file.name}</div>
+              <div className="text-xs text-gray-500">{formatBytes(file.size)}</div>
             </div>
+            <button onClick={() => setFile(null)} className="text-xs underline">
+              Remove
+            </button>
           </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Document title"
+            className="rounded-xl border px-3 py-2 text-sm"
+          />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="rounded-xl border px-3 py-2 text-sm"
+          >
+            <option>Offer Letter</option>
+            <option>Payslip</option>
+            <option>Appointment Letter</option>
+            <option>HR Policy</option>
+            <option>Other</option>
+          </select>
+          <button
+            onClick={upload}
+            className="rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700"
+          >
+            Upload Document
+          </button>
         </div>
 
-        <input ref={fileRef} type="file" className="hidden" onChange={onPickFile} />
-
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={clearForm}
-            className="px-4 py-2 rounded-xl text-sm border bg-white hover:bg-gray-50"
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            onClick={uploadDoc}
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
-          >
-            Upload
-          </button>
-        </div>
+        <input type="file" ref={fileRef} className="hidden" onChange={pickFile} />
       </div>
 
-      {/* List / Filters */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Uploaded Documents</h2>
-            <p className="text-xs text-gray-500">
-              View documents with name, date and time. You can download or delete.
-            </p>
-          </div>
+      {/* Search */}
+      <div className="flex items-center gap-2">
+        <Search size={16} className="text-gray-400" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search documents..."
+          className="w-full md:w-72 rounded-xl border px-3 py-2 text-sm"
+        />
+      </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-            <select
-              value={catFilter}
-              onChange={(e) => setCatFilter(e.target.value)}
-              className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none
-                         focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
-            >
-              <option>All</option>
-              <option>Offer Letter</option>
-              <option>Payslip</option>
-              <option>Appointment Letter</option>
-              <option>Confirmation Letter</option>
-              <option>HR Policy</option>
-              <option>Other</option>
-            </select>
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search documents..."
-              className="w-full sm:w-64 rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none
-                         focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
-            />
-          </div>
-        </div>
-
-        <div className="mt-4 overflow-x-auto border rounded-2xl">
+      {/* LIST VIEW */}
+      {view === "table" && (
+        <div className="bg-white rounded-2xl border overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 text-gray-600">
               <tr>
-                <th className="text-left px-4 py-3 font-medium">Document</th>
-                <th className="text-left px-4 py-3 font-medium">Category</th>
-                <th className="text-left px-4 py-3 font-medium">Uploaded</th>
-                <th className="text-left px-4 py-3 font-medium">Size</th>
-                <th className="text-right px-4 py-3 font-medium">Actions</th>
+                <th className="px-4 py-3 text-left">Document</th>
+                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Size</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-
             <tbody className="divide-y">
-              {filteredDocs.length === 0 ? (
+              {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                    No documents uploaded yet.
+                  <td colSpan="4" className="text-center py-10 text-gray-500">
+                    No documents found
                   </td>
                 </tr>
-              ) : (
-                filteredDocs.map((d) => {
-                  const { date, time } = formatDateTime(d.uploadedAt);
-                  return (
-                    <tr key={d.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-start gap-3">
-                          <span className={badgeClass(d.typeLabel)}>{d.typeLabel}</span>
-                          <div className="min-w-0">
-                            <div className="font-semibold text-gray-900 truncate">{d.title}</div>
-                            <div className="text-xs text-gray-500 truncate">{d.fileName}</div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                          {d.category}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <div className="text-gray-700">{date}</div>
-                        <div className="text-xs text-gray-500">{time}</div>
-                      </td>
-
-                      <td className="px-4 py-3 text-gray-700">{formatBytes(d.size)}</td>
-
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-2">
-                          <a
-                            href={d.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-3 py-1.5 rounded-lg text-xs border bg-white hover:bg-gray-50"
-                          >
-                            View
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => downloadDoc(d)}
-                            className="px-3 py-1.5 rounded-lg text-xs border bg-white hover:bg-gray-50"
-                          >
-                            Download
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeDoc(d.id)}
-                            className="px-3 py-1.5 rounded-lg text-xs border bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
               )}
+              {filtered.map((d) => (
+                <tr key={d.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex gap-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
+                          d.type
+                        )}`}
+                      >
+                        {d.type}
+                      </span>
+                      <div>
+                        <div className="font-semibold">{d.title}</div>
+                        <div className="text-xs text-gray-500">{d.fileName}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">{d.category}</td>
+                  <td className="px-4 py-3">{formatBytes(d.size)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-2">
+                      <a href={d.url} target="_blank" rel="noreferrer">
+                        <Eye size={16} />
+                      </a>
+                      <a href={d.url} download>
+                        <Download size={16} />
+                      </a>
+                      <button onClick={() => remove(d.id)}>
+                        <Trash2 size={16} className="text-red-600" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+      )}
 
-        <div className="mt-3 text-xs text-gray-500">
-          Note: This is demo (local state). For real project, connect to backend (Supabase storage) so files stay after refresh.
+      {/* GRID VIEW */}
+      {view === "grid" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map((d) => (
+            <div key={d.id} className="bg-white border rounded-2xl p-4 shadow-sm">
+              <span
+                className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
+                  d.type
+                )}`}
+              >
+                {d.type}
+              </span>
+              <h3 className="font-semibold truncate">{d.title}</h3>
+              <p className="text-xs text-gray-500 truncate">{d.fileName}</p>
+              <p className="text-xs mt-1">{formatBytes(d.size)}</p>
+
+              <div className="flex justify-end gap-3 mt-4">
+                <a href={d.url} target="_blank" rel="noreferrer">
+                  <Eye size={16} />
+                </a>
+                <a href={d.url} download>
+                  <Download size={16} />
+                </a>
+                <button onClick={() => remove(d.id)}>
+                  <Trash2 size={16} className="text-red-600" />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
+
+      <p className="text-xs text-gray-400">
+        Demo UI only – integrate Supabase / backend for real storage.
+      </p>
     </section>
   );
-};
-
-export default Documents;
+}

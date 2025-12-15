@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 // ---------------- DEMO DATA ----------------
 const seedRequests = [
@@ -61,10 +61,18 @@ const diffDaysInclusive = (from, to) => {
 };
 
 const pill = (status) => {
-  const base = "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border";
-  if (status === "Approved") return `${base} bg-green-50 text-green-700 border-green-200`;
-  if (status === "Rejected") return `${base} bg-red-50 text-red-700 border-red-200`;
-  return `${base} bg-yellow-50 text-yellow-800 border-yellow-200`;
+  const base =
+    "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border";
+  if (status === "Approved") return `${base} bg-emerald-50 text-emerald-700 border-emerald-200`;
+  if (status === "Rejected") return `${base} bg-rose-50 text-rose-700 border-rose-200`;
+  return `${base} bg-amber-50 text-amber-800 border-amber-200`;
+};
+
+const roleBadge = (role) => {
+  const base =
+    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border";
+  if (role === "employee") return `${base} bg-indigo-50 text-indigo-700 border-indigo-200`;
+  return `${base} bg-slate-50 text-slate-700 border-slate-200`;
 };
 
 const fmtDT = (iso) => {
@@ -75,15 +83,20 @@ const fmtDT = (iso) => {
   return { date, time };
 };
 
+const initials = (name = "") => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const a = parts[0]?.[0] || "U";
+  const b = parts[1]?.[0] || "";
+  return (a + b).toUpperCase();
+};
+
 // ---------------- PAGE ----------------
 const LeaveManagement = () => {
   // ✅ Demo user (replace with real auth user)
   const currentEmployee = { id: "EMP-001", name: "Priya Sharma" };
   const currentAdmin = { id: "ADM-001", name: "Admin User" };
 
-  // ✅ Toggle like image
   const [mode, setMode] = useState("employee"); // "employee" | "admin"
-
   const [requests, setRequests] = useState(seedRequests);
 
   // Admin apply form open/close
@@ -102,6 +115,19 @@ const LeaveManagement = () => {
   // View modal
   const [viewing, setViewing] = useState(null);
 
+  // Summary details modal
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryStatus, setSummaryStatus] = useState("All");
+
+  // ESC close for view modal
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") setViewing(null);
+    };
+    if (viewing) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewing]);
+
   // ✅ Only show own letters depending on role
   const dataset = useMemo(() => {
     if (mode === "employee") {
@@ -109,7 +135,6 @@ const LeaveManagement = () => {
         (r) => r.ownerRole === "employee" && r.ownerId === currentEmployee.id
       );
     }
-    // admin
     return requests.filter((r) => r.ownerRole === "admin" && r.ownerId === currentAdmin.id);
   }, [mode, requests, currentEmployee.id, currentAdmin.id]);
 
@@ -124,7 +149,9 @@ const LeaveManagement = () => {
         (r) =>
           r.id.toLowerCase().includes(q) ||
           r.leaveType.toLowerCase().includes(q) ||
-          r.reason.toLowerCase().includes(q)
+          r.reason.toLowerCase().includes(q) ||
+          r.ownerName.toLowerCase().includes(q) ||
+          r.ownerId.toLowerCase().includes(q)
       );
     }
 
@@ -139,6 +166,18 @@ const LeaveManagement = () => {
     const rejected = dataset.filter((r) => r.status === "Rejected").length;
     return { total, pending, approved, rejected };
   }, [dataset]);
+
+  const summaryList = useMemo(() => {
+    let list = [...dataset];
+    if (summaryStatus !== "All") list = list.filter((r) => r.status === summaryStatus);
+    list.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
+    return list;
+  }, [dataset, summaryStatus]);
+
+  const openSummary = (st) => {
+    setSummaryStatus(st);
+    setSummaryOpen(true);
+  };
 
   const submitAdminLeave = () => {
     if (!from || !to || !reason.trim()) {
@@ -187,7 +226,7 @@ const LeaveManagement = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Toggle like screenshot */}
+          {/* Toggle */}
           <div className="bg-white border border-gray-200 rounded-xl p-1 flex shadow-sm">
             <button
               type="button"
@@ -196,11 +235,11 @@ const LeaveManagement = () => {
                 setShowApply(false);
                 setSearch("");
                 setStatusFilter("All");
+                setSummaryOpen(false);
+                setViewing(null);
               }}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-                mode === "employee"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-700 hover:bg-gray-50"
+                mode === "employee" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
               }`}
             >
               Employee
@@ -212,14 +251,14 @@ const LeaveManagement = () => {
                 setMode("admin");
                 setSearch("");
                 setStatusFilter("All");
+                setSummaryOpen(false);
+                setViewing(null);
               }}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-                mode === "admin"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-700 hover:bg-gray-50"
+                mode === "admin" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
               }`}
             >
-             Admin
+              Admin
             </button>
           </div>
 
@@ -236,7 +275,7 @@ const LeaveManagement = () => {
         </div>
       </div>
 
-      {/* Admin Apply Form (ONLY when button clicked) */}
+      {/* Admin Apply Form */}
       {mode === "admin" && showApply && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-start justify-between gap-3">
@@ -326,24 +365,28 @@ const LeaveManagement = () => {
         </div>
       )}
 
-      {/* Summary */}
+      {/* Summary (CLICKABLE) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white border rounded-xl p-3">
+        <button onClick={() => openSummary("All")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Total</div>
           <div className="text-xl font-semibold">{counts.total}</div>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
+          <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
+        </button>
+        <button onClick={() => openSummary("Pending")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Pending</div>
           <div className="text-xl font-semibold">{counts.pending}</div>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
+          <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
+        </button>
+        <button onClick={() => openSummary("Approved")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Approved</div>
           <div className="text-xl font-semibold">{counts.approved}</div>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
+          <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
+        </button>
+        <button onClick={() => openSummary("Rejected")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Rejected</div>
           <div className="text-xl font-semibold">{counts.rejected}</div>
-        </div>
+          <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
+        </button>
       </div>
 
       {/* Filters */}
@@ -366,8 +409,8 @@ const LeaveManagement = () => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by request id / type / reason..."
-            className="w-full md:w-80 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
+            placeholder="Search by request id / name / id / type / reason..."
+            className="w-full md:w-96 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
           />
         </div>
       </div>
@@ -398,16 +441,26 @@ const LeaveManagement = () => {
                 return (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <div className="font-semibold">{r.leaveType}</div>
-                      <div className="text-xs text-gray-500">
-                        #{r.id} • Applied: {date} {time}
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">
+                          {initials(r.ownerName)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold">{r.leaveType}</div>
+                          <div className="text-xs text-gray-500">
+                            #{r.id} • Applied: {date} {time}
+                          </div>
+                          <div className="text-xs text-gray-600 mt-1 line-clamp-2">{r.reason}</div>
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-600 mt-1 line-clamp-2">{r.reason}</div>
                     </td>
 
                     <td className="px-4 py-3">
                       <div className="text-gray-700">
                         {r.from} → {r.to}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {r.ownerName} • {r.ownerId}
                       </div>
                     </td>
 
@@ -415,9 +468,7 @@ const LeaveManagement = () => {
 
                     <td className="px-4 py-3">
                       <span className={pill(r.status)}>{r.status}</span>
-                      {r.decidedAt && (
-                        <div className="text-xs text-gray-500 mt-1">Decided: {r.decidedAt}</div>
-                      )}
+                      {r.decidedAt && <div className="text-xs text-gray-500 mt-1">Decided: {r.decidedAt}</div>}
                     </td>
 
                     <td className="px-4 py-3">
@@ -439,76 +490,199 @@ const LeaveManagement = () => {
         </table>
       </div>
 
-      {/* View Modal */}
-      {viewing && (
+      {/* ✅ Summary Details Modal */}
+      {summaryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-xl bg-white rounded-2xl shadow-lg border overflow-hidden">
-            <div className="p-5 border-b flex items-start justify-between">
+          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-lg border overflow-hidden">
+            <div className="p-5 border-b flex items-start justify-between gap-3">
               <div>
-                <div className="text-lg font-semibold">Leave Letter Details</div>
-                <div className="text-xs text-gray-500 mt-1">#{viewing.id}</div>
+                <div className="text-lg font-semibold">
+                  {summaryStatus === "All" ? "All Leave Letters" : `${summaryStatus} Leave Letters`}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Showing: <span className="font-semibold">{summaryList.length}</span> requests • Mode:{" "}
+                  <span className="font-semibold">{mode.toUpperCase()}</span>
+                </div>
               </div>
+
               <button
                 type="button"
-                onClick={() => setViewing(null)}
-                className="text-gray-500 hover:text-gray-700 text-sm"
+                onClick={() => setSummaryOpen(false)}
+                className="px-3 py-1.5 rounded-lg text-xs border bg-white hover:bg-gray-50"
               >
-                ✕
+                Close
               </button>
             </div>
 
-            <div className="p-5 space-y-3 text-sm">
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                  {viewing.leaveType}
-                </span>
-                <span className={pill(viewing.status)}>{viewing.status}</span>
-              </div>
+            <div className="p-5">
+              {summaryList.length === 0 ? (
+                <div className="text-sm text-gray-500 py-10 text-center">No records found.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left px-4 py-3 font-medium">Employee Details</th>
+                        <th className="text-left px-4 py-3 font-medium">Leave</th>
+                        <th className="text-left px-4 py-3 font-medium">Dates</th>
+                        <th className="text-left px-4 py-3 font-medium">Status</th>
+                        <th className="text-right px-4 py-3 font-medium">Action</th>
+                      </tr>
+                    </thead>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">From</div>
-                  <div className="font-semibold">{viewing.from}</div>
+                    <tbody className="divide-y">
+                      {summaryList.map((r) => {
+                        const { date, time } = fmtDT(r.appliedAt);
+                        return (
+                          <tr key={`sum-${r.id}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">
+                                  {initials(r.ownerName)}
+                                </div>
+                                <div>
+                                  <div className="font-semibold">{r.ownerName}</div>
+                                  <div className="text-xs text-gray-500">
+                                    ID: <span className="font-semibold">{r.ownerId}</span>
+                                  </div>
+                                  <div className="mt-1">
+                                    <span className={roleBadge(r.ownerRole)}>
+                                      Employment: {r.ownerRole === "employee" ? "Employee" : "Admin"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <div className="font-semibold">{r.leaveType}</div>
+                              <div className="text-xs text-gray-500">
+                                #{r.id} • Applied: {date} {time}
+                              </div>
+                              <div className="text-xs text-gray-600 mt-1 line-clamp-2">{r.reason}</div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <div className="text-gray-700">
+                                {r.from} → {r.to}
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                Days: <span className="font-semibold">{diffDaysInclusive(r.from, r.to)}</span>
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <span className={pill(r.status)}>{r.status}</span>
+                              {r.decidedAt && <div className="text-xs text-gray-500 mt-1">Decided: {r.decidedAt}</div>}
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewing(r)}
+                                  className="px-3 py-1.5 rounded-lg text-xs border bg-white hover:bg-gray-50"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">To</div>
-                  <div className="font-semibold">{viewing.to}</div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Total Days</div>
-                <div className="font-semibold">
-                  {diffDaysInclusive(viewing.from, viewing.to)}
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Reason</div>
-                <div className="text-gray-800 mt-1">{viewing.reason}</div>
-              </div>
-
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Applied</div>
-                <div className="font-semibold">
-                  {fmtDT(viewing.appliedAt).date} {fmtDT(viewing.appliedAt).time}
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Decision Note</div>
-                <div className="text-gray-800 mt-1">{viewing.decisionNote || "-"}</div>
-              </div>
+              )}
             </div>
 
             <div className="p-5 border-t flex items-center justify-end">
               <button
                 type="button"
-                onClick={() => setViewing(null)}
-                className="px-4 py-2 rounded-md text-sm border bg-white hover:bg-gray-50"
+                onClick={() => setSummaryOpen(false)}
+                className="px-4 py-2 rounded-xl text-sm border bg-white hover:bg-gray-50"
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ View Letter Modal (CLEAN PREMIUM) */}
+      {viewing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setViewing(null);
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-500 text-white px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Leave request</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-semibold">#{viewing.id}</span>
+                  <span className={pill(viewing.status)}>{viewing.status}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewing(null)}
+                className="text-white/80 hover:text-white text-sm"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 text-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center text-xs font-bold">
+                  {initials(viewing.ownerName)}
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">{viewing.ownerName}</p>
+                  <p className="text-xs text-slate-500">{viewing.ownerId}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">From</p>
+                  <p className="font-semibold text-slate-900">{viewing.from}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">To</p>
+                  <p className="font-semibold text-slate-900">{viewing.to}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">Days</p>
+                  <p className="font-semibold text-slate-900">{diffDaysInclusive(viewing.from, viewing.to)}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">Applied</p>
+                  <p className="font-semibold text-slate-900">{fmtDT(viewing.appliedAt).date}</p>
+                  <p className="text-[11px] text-slate-500">{fmtDT(viewing.appliedAt).time}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-white border border-slate-100 p-3">
+                <p className="text-[11px] text-slate-500">Reason</p>
+                <p className="mt-1 text-slate-800 leading-relaxed">{viewing.reason || "-"}</p>
+              </div>
+
+              <div className="rounded-xl bg-white border border-slate-100 p-3">
+                <p className="text-[11px] text-slate-500">Decision Note</p>
+                <p className="mt-1 text-slate-800 leading-relaxed">
+                  {viewing.decisionNote || "No decision yet."}
+                </p>
+                {viewing.decidedAt && (
+                  <p className="mt-1 text-[11px] text-slate-500">Decided at: {fmtDT(viewing.decidedAt).date}</p>
+                )}
+              </div>
             </div>
           </div>
         </div>

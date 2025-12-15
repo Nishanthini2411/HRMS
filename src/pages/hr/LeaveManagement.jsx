@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 
 // ---------------- DEMO DATA (Employee + Admin Requests) ----------------
 const seedRequests = [
@@ -69,6 +70,15 @@ const pill = (status) => {
   return `${base} bg-yellow-50 text-yellow-800 border-yellow-200`;
 };
 
+// for modal header (looks better on gradient)
+const pillDark = (status) => {
+  const base =
+    "inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border border-white/20 bg-white/15 text-white";
+  if (status === "Approved") return `${base}`;
+  if (status === "Rejected") return `${base}`;
+  return `${base}`;
+};
+
 const roleBadge = (role) => {
   const base = "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border";
   if (role === "employee") return `${base} bg-blue-50 text-blue-700 border-blue-200`;
@@ -82,6 +92,13 @@ const fmtDT = (iso) => {
   const date = d.toLocaleDateString();
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return { date, time };
+};
+
+const initials = (name = "") => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const a = parts[0]?.[0] || "U";
+  const b = parts[1]?.[0] || "";
+  return (a + b).toUpperCase();
 };
 
 // ---------------- PAGE (HR VIEW) ----------------
@@ -102,7 +119,7 @@ export default function LeaveManagement() {
 
   // Apply Leave (HR) modal
   const [showApply, setShowApply] = useState(false);
-  const [applyForRole, setApplyForRole] = useState("employee"); // create request for employee/admin/hr (demo)
+  const [applyForRole, setApplyForRole] = useState("employee");
   const [applyOwnerId, setApplyOwnerId] = useState("EMP-003");
   const [applyOwnerName, setApplyOwnerName] = useState("New Employee");
   const [applyLeaveType, setApplyLeaveType] = useState("Casual Leave");
@@ -124,6 +141,15 @@ export default function LeaveManagement() {
       localStorage.setItem(LS_KEY, JSON.stringify(requests));
     } catch {}
   }, [requests]);
+
+  // ESC close for view modal
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") setViewing(null);
+    };
+    if (viewing) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewing]);
 
   // ---------------- Derived Lists ----------------
   const filtered = useMemo(() => {
@@ -183,9 +209,7 @@ export default function LeaveManagement() {
     closeView();
   };
 
-  const closeApply = () => {
-    setShowApply(false);
-  };
+  const closeApply = () => setShowApply(false);
 
   const submitApply = () => {
     if (!applyOwnerName.trim() || !applyOwnerId.trim()) {
@@ -203,7 +227,7 @@ export default function LeaveManagement() {
 
     const newReq = {
       id: `LR-${Math.floor(1000 + Math.random() * 9000)}`,
-      ownerRole: applyForRole, // employee/admin/hr
+      ownerRole: applyForRole,
       ownerId: applyOwnerId.trim(),
       ownerName: applyOwnerName.trim(),
       leaveType: applyLeaveType,
@@ -219,7 +243,6 @@ export default function LeaveManagement() {
 
     setRequests((prev) => [newReq, ...prev]);
 
-    // reset fields (keep role)
     setApplyLeaveType("Casual Leave");
     setApplyFrom("");
     setApplyTo("");
@@ -235,12 +258,9 @@ export default function LeaveManagement() {
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900">Leave Management</h1>
-          <p className="text-sm text-gray-600">
-            HR can view all leave requests and approve/reject them.
-          </p>
+          <p className="text-sm text-gray-600">HR can view all leave requests and approve/reject them.</p>
         </div>
 
-        {/* ✅ Apply Leave Button */}
         <button
           type="button"
           onClick={() => setShowApply(true)}
@@ -350,11 +370,7 @@ export default function LeaveManagement() {
                       <div className="font-semibold text-gray-800">{r.ownerName}</div>
                       <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
                         <span className={roleBadge(r.ownerRole)}>
-                          {r.ownerRole === "employee"
-                            ? "Employee"
-                            : r.ownerRole === "admin"
-                            ? "Admin"
-                            : "HR"}
+                          {r.ownerRole === "employee" ? "Employee" : r.ownerRole === "admin" ? "Admin" : "HR"}
                         </span>
                         <span>{r.ownerId}</span>
                       </div>
@@ -396,22 +412,16 @@ export default function LeaveManagement() {
         </table>
       </div>
 
-      {/* Apply Leave Modal */}
+      {/* Apply Leave Modal (unchanged) */}
       {showApply && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg border overflow-hidden">
             <div className="p-5 border-b flex items-start justify-between">
               <div>
                 <div className="text-lg font-semibold">Apply Leave</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Create a leave request (demo)
-                </div>
+                <div className="text-xs text-gray-500 mt-1">Create a leave request (demo)</div>
               </div>
-              <button
-                type="button"
-                onClick={closeApply}
-                className="text-gray-500 hover:text-gray-700 text-sm"
-              >
+              <button type="button" onClick={closeApply} className="text-gray-500 hover:text-gray-700 text-sm">
                 ✕
               </button>
             </div>
@@ -527,72 +537,94 @@ export default function LeaveManagement() {
         </div>
       )}
 
-      {/* View / Approve / Reject Modal */}
+      {/* ✅ HR VIEW MODAL (NOW SAME STYLE AS YOUR CLEAN PREMIUM LETTER MODAL) */}
       {viewing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg border overflow-hidden">
-            <div className="p-5 border-b flex items-start justify-between">
-              <div>
-                <div className="text-lg font-semibold">Leave Request</div>
-                <div className="text-xs text-gray-500 mt-1">#{viewing.id}</div>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeView();
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-700 via-indigo-600 to-sky-500 text-white px-4 py-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Leave request</p>
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                  <span className="text-lg font-semibold">#{viewing.id}</span>
+                  <span className={pillDark(viewing.status)}>{viewing.status}</span>
+                </div>
               </div>
+
               <button
                 type="button"
                 onClick={closeView}
-                className="text-gray-500 hover:text-gray-700 text-sm"
+                className="rounded-xl border border-white/20 bg-white/10 p-2 hover:bg-white/15"
+                aria-label="Close"
               >
-                ✕
+                <X size={18} className="text-white" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-sm">
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
-                  {viewing.leaveType}
-                </span>
-                <span className={roleBadge(viewing.ownerRole)}>
-                  {viewing.ownerRole === "employee"
-                    ? "Employee"
-                    : viewing.ownerRole === "admin"
-                    ? "Admin"
-                    : "HR"}
-                </span>
-                <span className={pill(viewing.status)}>{viewing.status}</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">Owner</div>
-                  <div className="font-semibold">{viewing.ownerName}</div>
-                  <div className="text-xs text-gray-500 mt-1">{viewing.ownerId}</div>
+            {/* Body */}
+            <div className="p-4 space-y-3 text-sm">
+              {/* Owner row */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center text-xs font-bold">
+                  {initials(viewing.ownerName)}
                 </div>
-
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">Days</div>
-                  <div className="font-semibold">
-                    {diffDaysInclusive(viewing.from, viewing.to)}
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900 truncate">{viewing.ownerName}</p>
+                  <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                    <span className={roleBadge(viewing.ownerRole)}>
+                      {viewing.ownerRole === "employee" ? "Employee" : viewing.ownerRole === "admin" ? "Admin" : "HR"}
+                    </span>
+                    <span className="text-xs text-slate-500">{viewing.ownerId}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">From</div>
-                  <div className="font-semibold">{viewing.from}</div>
+              {/* Tags */}
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
+                  {viewing.leaveType}
+                </span>
+                <span className={pill(viewing.status)}>{viewing.status}</span>
+              </div>
+
+              {/* Dates + Days */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">From</p>
+                  <p className="font-semibold text-slate-900">{viewing.from}</p>
                 </div>
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">To</div>
-                  <div className="font-semibold">{viewing.to}</div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">To</p>
+                  <p className="font-semibold text-slate-900">{viewing.to}</p>
                 </div>
               </div>
 
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Reason</div>
-                <div className="text-gray-800 mt-1">{viewing.reason}</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">Days</p>
+                  <p className="font-semibold text-slate-900">{diffDaysInclusive(viewing.from, viewing.to)}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                  <p className="text-[11px] text-slate-500">Applied</p>
+                  <p className="font-semibold text-slate-900">{fmtDT(viewing.appliedAt).date}</p>
+                  <p className="text-[11px] text-slate-500">{fmtDT(viewing.appliedAt).time}</p>
+                </div>
               </div>
 
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">HR Note (optional)</div>
+              {/* Reason */}
+              <div className="rounded-xl bg-white border border-slate-100 p-3">
+                <p className="text-[11px] text-slate-500">Reason</p>
+                <p className="mt-1 text-slate-800 leading-relaxed">{viewing.reason || "-"}</p>
+              </div>
+
+              {/* HR note */}
+              <div className="rounded-xl bg-white border border-slate-100 p-3">
+                <p className="text-[11px] text-slate-500">HR Note (optional)</p>
                 <textarea
                   rows={3}
                   value={decisionNote}
@@ -602,21 +634,20 @@ export default function LeaveManagement() {
                 />
               </div>
 
+              {/* Decision info */}
               {viewing.decidedAt && (
-                <div className="rounded-xl border p-3">
-                  <div className="text-xs text-gray-500">Decision</div>
-                  <div className="font-semibold">
-                    {viewing.status} • {viewing.decidedAt}{" "}
-                    {viewing.decidedBy ? `• ${viewing.decidedBy}` : ""}
-                  </div>
-                  <div className="text-gray-700 mt-1 text-sm">
-                    Note: {viewing.decisionNote || "-"}
-                  </div>
+                <div className="rounded-xl bg-white border border-slate-100 p-3">
+                  <p className="text-[11px] text-slate-500">Decision</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {viewing.status} • {viewing.decidedAt} {viewing.decidedBy ? `• ${viewing.decidedBy}` : ""}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-700">Note: {viewing.decisionNote || "-"}</p>
                 </div>
               )}
             </div>
 
-            <div className="p-5 border-t flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+            {/* Footer actions */}
+            <div className="px-4 py-3 border-t flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={closeView}
@@ -625,7 +656,7 @@ export default function LeaveManagement() {
                 Close
               </button>
 
-              <div className="flex gap-2 justify-end">
+              <div className="flex gap-2">
                 <button
                   type="button"
                   disabled={viewing.status !== "Pending"}

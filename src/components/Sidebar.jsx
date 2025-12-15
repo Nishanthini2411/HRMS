@@ -9,7 +9,7 @@ const linkClasses = ({ isActive }) =>
 
 const Sidebar = () => {
   return (
-    <aside className="w-64 bg-white border-r shadow-sm flex flex-col">
+    <aside className="w-64 bg-white border-r shadow-sm flex flex-col h-screen sticky top-0">
       <div className="p-5 border-b">
         <h1 className="text-xl font-bold text-blue-700">HRMS</h1>
       </div>
