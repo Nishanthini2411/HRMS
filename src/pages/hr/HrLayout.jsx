@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, CalendarDays, ClipboardList, LogOut } from "lucide-react";
+import { LayoutDashboard, CalendarDays, ClipboardList, LogOut, UserRound } from "lucide-react";
 
 const SideItem = ({ to, icon: Icon, label, end }) => (
   <NavLink
@@ -43,6 +43,7 @@ export default function HrLayout() {
             <SideItem to="/hr-dashboard" end icon={LayoutDashboard} label="Dashboard" />
             <SideItem to="/hr-dashboard/leave" icon={CalendarDays} label="Leave Management" />
             <SideItem to="/hr-dashboard/attendance" icon={ClipboardList} label="Attendance" />
+            <SideItem to="/hr-dashboard/people" icon={UserRound} label="People Directory" />
           </nav>
 
           {/* Logout */}

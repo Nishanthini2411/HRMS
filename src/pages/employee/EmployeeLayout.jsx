@@ -1,12 +1,24 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { ClipboardCheck, FileText, CalendarDays, LogOut } from "lucide-react";
+import {
+  Bell,
+  CalendarDays,
+  ClipboardCheck,
+  FileText,
+  HelpCircle,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  UserCircle2,
+  WalletCards,
+  UserRound,
+} from "lucide-react";
 
-const Tab = ({ to, icon: Icon, label, end }) => (
+const SideItem = ({ to, icon: Icon, label, end }) => (
   <NavLink
     to={to}
     end={end}
     className={({ isActive }) =>
-      `inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
+      `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition ${
         isActive
           ? "bg-purple-700 text-white shadow"
           : "text-gray-700 hover:bg-purple-50 hover:text-purple-700"
@@ -14,9 +26,21 @@ const Tab = ({ to, icon: Icon, label, end }) => (
     }
   >
     <Icon size={18} />
-    {label}
+    <span className="truncate">{label}</span>
   </NavLink>
 );
+
+const tabs = [
+  { to: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "profile", icon: UserCircle2, label: "My Profile" },
+  { to: "attendance", icon: ClipboardCheck, label: "Attendance" },
+  { to: "leave", icon: CalendarDays, label: "Leave" },
+  { to: "documents", icon: FileText, label: "Documents" },
+  { to: "payroll", icon: WalletCards, label: "Payroll" },
+  { to: "notifications", icon: Bell, label: "Notifications" },
+  { to: "settings", icon: Settings, label: "Settings" },
+  // { to: "/employee-dashboard/people", icon: UserRound, label: "People Directory" },
+];
 
 export default function EmployeeLayout() {
   const navigate = useNavigate();
@@ -26,36 +50,50 @@ export default function EmployeeLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-extrabold text-gray-900 truncate">
-              Employee Dashboard
-            </h1>
-            <p className="text-xs sm:text-sm text-gray-500">
-              Attendance • Leave • Documents
-            </p>
+    <div className="min-h-screen bg-gray-50 flex">
+      <aside className="w-[280px] bg-white border-r sticky top-0 h-screen">
+        <div className="h-full flex flex-col">
+          <div className="p-5 border-b">
+            <div className="text-xl font-extrabold text-gray-900">Employee</div>
+            <div className="text-xs text-gray-500 mt-1">Self Service Workspace</div>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-black transition"
-          >
-            <LogOut size={18} />
-            Logout
-          </button>
-        </div>
+          <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
+            {tabs.map((item) => (
+              <SideItem
+                key={item.to}
+                to={item.to}
+                icon={item.icon}
+                label={item.label}
+                end={item.to === "dashboard"}
+              />
+            ))}
+          </nav>
 
-        <div className="max-w-6xl mx-auto px-4 pb-4 flex flex-wrap gap-2">
-          <Tab to="attendance" icon={ClipboardCheck} label="Attendance" end={false} />
-          <Tab to="leave" icon={CalendarDays} label="LeaveManagement" end={false} />
-          <Tab to="documents" icon={FileText} label="Documents" end={false} />
+          <div className="p-4 border-t">
+            <button
+              onClick={handleLogout}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-black transition"
+            >
+              <LogOut size={18} />
+              Logout
+            </button>
+          </div>
         </div>
-      </header>
+      </aside>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
-        <Outlet />
+      <main className="flex-1 flex flex-col">
+        <header className="bg-white border-b sticky top-0 z-40">
+          <div className="px-6 py-4">
+            <div className="text-sm text-gray-500">Employee Workspace</div>
+          </div>
+        </header>
+
+        <div className="p-6 flex-1">
+          <div className="bg-white rounded-2xl shadow-sm border p-6">
+            <Outlet />
+          </div>
+        </div>
       </main>
     </div>
   );

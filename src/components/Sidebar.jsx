@@ -32,6 +32,9 @@ const Sidebar = () => {
         <NavLink to="/dashboard/documents" className={linkClasses}>
           Documents
         </NavLink>
+        <NavLink to="/dashboard/people" className={linkClasses}>
+          People Directory
+        </NavLink>
       </nav>
       <div className="p-4 border-t text-xs text-gray-400">
         © {new Date().getFullYear()} HRMS Lite

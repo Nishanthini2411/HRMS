@@ -1,20 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  UploadCloud,
-  FileText,
-  Download,
-  Trash2,
-  Eye,
-  Search,
-  Grid,
-  List,
-} from "lucide-react";
+import { Download, Eye, FileText, Grid, List, Search, Trash2, UploadCloud } from "lucide-react";
 
-/* ---------------- Employee ---------------- */
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
 const LS_KEY = (id) => `HRMS_EMP_DOCS_${id}`;
 
-/* ---------------- Utils ---------------- */
 const loadDocs = (id) => {
   try {
     const raw = localStorage.getItem(LS_KEY(id));
@@ -24,9 +13,7 @@ const loadDocs = (id) => {
   }
 };
 
-const saveDocs = (id, docs) => {
-  localStorage.setItem(LS_KEY(id), JSON.stringify(docs));
-};
+const saveDocs = (id, docs) => localStorage.setItem(LS_KEY(id), JSON.stringify(docs));
 
 const formatBytes = (bytes) => {
   if (!bytes && bytes !== 0) return "-";
@@ -53,10 +40,8 @@ const badgeColor = (type) => {
   return "bg-gray-100 text-gray-700";
 };
 
-/* ---------------- Component ---------------- */
 export default function EmployeeDocuments() {
   const fileRef = useRef(null);
-
   const [docs, setDocs] = useState(() => loadDocs(EMP.id));
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState("");
@@ -68,7 +53,6 @@ export default function EmployeeDocuments() {
     saveDocs(EMP.id, docs);
   }, [docs]);
 
-  /* ---------------- Actions ---------------- */
   const pickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -77,7 +61,7 @@ export default function EmployeeDocuments() {
   };
 
   const upload = async () => {
-    if (!file || !title) return alert("Title & file required");
+    if (!file || !title) return alert("Title and file are required");
 
     const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -100,7 +84,7 @@ export default function EmployeeDocuments() {
     setDocs((p) => [doc, ...p]);
     setFile(null);
     setTitle("");
-    fileRef.current.value = "";
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   const remove = (id) => setDocs((p) => p.filter((d) => d.id !== id));
@@ -114,49 +98,36 @@ export default function EmployeeDocuments() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return docs.filter(
-      (d) =>
-        d.title.toLowerCase().includes(q) ||
-        d.fileName.toLowerCase().includes(q)
-    );
+    return docs.filter((d) => d.title.toLowerCase().includes(q) || d.fileName.toLowerCase().includes(q));
   }, [docs, search]);
 
-  /* ---------------- UI ---------------- */
   return (
     <section className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">My Documents</h1>
-          <p className="text-sm text-gray-500">
-            Personal & HR documents for {EMP.name}
-          </p>
+          <p className="text-sm text-gray-500">Personal and HR documents for {EMP.name}</p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setView("table")}
-            className={`p-2 rounded-lg border ${
-              view === "table" ? "bg-blue-600 text-white" : "bg-white"
-            }`}
+            className={`p-2 rounded-lg border ${view === "table" ? "bg-blue-600 text-white" : "bg-white"}`}
           >
             <List size={16} />
           </button>
           <button
             onClick={() => setView("grid")}
-            className={`p-2 rounded-lg border ${
-              view === "grid" ? "bg-blue-600 text-white" : "bg-white"
-            }`}
+            className={`p-2 rounded-lg border ${view === "grid" ? "bg-blue-600 text-white" : "bg-white"}`}
           >
             <Grid size={16} />
           </button>
         </div>
       </div>
 
-      {/* Upload Box */}
       <div className="bg-white rounded-2xl border shadow-sm p-6">
         <div
-          onClick={() => fileRef.current.click()}
+          onClick={() => fileRef.current?.click()}
           className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-blue-500 transition"
         >
           <UploadCloud className="mx-auto text-blue-600" />
@@ -168,9 +139,7 @@ export default function EmployeeDocuments() {
           <div className="mt-4 flex items-center justify-between bg-gray-50 p-3 rounded-xl">
             <div>
               <div className="font-medium">{file.name}</div>
-              <div className="text-xs text-gray-500">
-                {formatBytes(file.size)}
-              </div>
+              <div className="text-xs text-gray-500">{formatBytes(file.size)}</div>
             </div>
             <button onClick={() => setFile(null)} className="text-xs underline">
               Remove
@@ -207,7 +176,6 @@ export default function EmployeeDocuments() {
         <input type="file" ref={fileRef} className="hidden" onChange={pickFile} />
       </div>
 
-      {/* Search */}
       <div className="flex items-center gap-2">
         <Search size={16} className="text-gray-400" />
         <input
@@ -218,7 +186,6 @@ export default function EmployeeDocuments() {
         />
       </div>
 
-      {/* TABLE VIEW */}
       {view === "table" && (
         <div className="bg-white rounded-2xl border overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -243,9 +210,7 @@ export default function EmployeeDocuments() {
                     <td className="px-4 py-3">
                       <div className="flex gap-3">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
-                            d.type
-                          )}`}
+                          className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(d.type)}`}
                         >
                           {d.type}
                         </span>
@@ -278,15 +243,12 @@ export default function EmployeeDocuments() {
         </div>
       )}
 
-      {/* GRID VIEW */}
       {view === "grid" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((d) => (
             <div key={d.id} className="bg-white border rounded-2xl p-4 shadow-sm">
               <span
-                className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
-                  d.type
-                )}`}
+                className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(d.type)}`}
               >
                 {d.type}
               </span>
@@ -310,9 +272,7 @@ export default function EmployeeDocuments() {
         </div>
       )}
 
-      <p className="text-xs text-gray-400">
-        Demo only – employee documents stored locally.
-      </p>
+      <p className="text-xs text-gray-400">Demo only — employee documents stored locally.</p>
     </section>
   );
 }

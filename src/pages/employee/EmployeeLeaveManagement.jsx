@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Eye, Pencil, X, Save, Trash2 } from "lucide-react";
+import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
 
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
 const LS_KEY = (empId) => `HRMS_EMP_LEAVES_${empId}`;
-
 const leaveTypes = ["Casual Leave", "Sick Leave", "Annual Leave", "Work From Home", "Other"];
 
 const tone = {
@@ -23,12 +22,9 @@ const loadLeaves = (id) => {
   }
 };
 
-const saveLeaves = (id, rows) =>
-  localStorage.setItem(LS_KEY(id), JSON.stringify(rows));
-
+const saveLeaves = (id, rows) => localStorage.setItem(LS_KEY(id), JSON.stringify(rows));
 const fmt = (iso) => new Date(iso).toLocaleString();
 
-/* ---------------- Modal ---------------- */
 const ModalShell = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
     <div className="w-full max-w-xl bg-white rounded-2xl shadow-xl">
@@ -43,7 +39,6 @@ const ModalShell = ({ title, onClose, children }) => (
   </div>
 );
 
-/* ---------------- Component ---------------- */
 export default function EmployeeLeaveManagement() {
   const [rows, setRows] = useState(() => loadLeaves(EMP.id));
   const [viewId, setViewId] = useState(null);
@@ -67,29 +62,29 @@ export default function EmployeeLeaveManagement() {
     saveLeaves(EMP.id, rows);
   }, [rows]);
 
-  const stats = useMemo(() => ({
-    Pending: rows.filter((r) => r.status === "Pending").length,
-    Approved: rows.filter((r) => r.status === "Approved").length,
-    Rejected: rows.filter((r) => r.status === "Rejected").length,
-    All: rows.length,
-  }), [rows]);
+  const stats = useMemo(
+    () => ({
+      Pending: rows.filter((r) => r.status === "Pending").length,
+      Approved: rows.filter((r) => r.status === "Approved").length,
+      Rejected: rows.filter((r) => r.status === "Rejected").length,
+      All: rows.length,
+    }),
+    [rows]
+  );
 
   const filtered = useMemo(() => {
     let list = [...rows];
     if (statusFilter !== "All") list = list.filter((r) => r.status === statusFilter);
-    if (search)
-      list = list.filter(
-        (r) =>
-          r.id.toLowerCase().includes(search.toLowerCase()) ||
-          r.leaveType.toLowerCase().includes(search.toLowerCase())
-      );
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter((r) => r.id.toLowerCase().includes(q) || r.leaveType.toLowerCase().includes(q));
+    }
     return list.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
   }, [rows, statusFilter, search]);
 
   const selectedView = rows.find((r) => r.id === viewId);
   const selectedEdit = rows.find((r) => r.id === editId);
 
-  /* ---------------- Actions ---------------- */
   const createLeave = (e) => {
     e.preventDefault();
     setRows((p) => [
@@ -107,7 +102,9 @@ export default function EmployeeLeaveManagement() {
       ...p,
     ]);
     setCreateOpen(false);
-    setCFrom(""); setCTo(""); setCReason("");
+    setCFrom("");
+    setCTo("");
+    setCReason("");
   };
 
   const openEdit = (r) => {
@@ -121,15 +118,15 @@ export default function EmployeeLeaveManagement() {
   const saveEdit = (e) => {
     e.preventDefault();
     setRows((p) =>
-      p.map((r) => (r.id === editId ? { ...r, leaveType: eType, from: eFrom, to: eTo, reason: eReason } : r))
+      p.map((r) =>
+        r.id === editId ? { ...r, leaveType: eType, from: eFrom, to: eTo, reason: eReason } : r
+      )
     );
     setEditId(null);
   };
 
-  /* ---------------- UI ---------------- */
   return (
     <div className="space-y-5">
-      {/* HEADER */}
       <div className="bg-slate-800 text-white rounded-2xl p-5">
         <div className="flex justify-between items-center">
           <div>
@@ -144,7 +141,6 @@ export default function EmployeeLeaveManagement() {
           </button>
         </div>
 
-        {/* STATUS FILTER */}
         <div className="mt-4 flex flex-wrap gap-2 text-xs">
           {Object.keys(stats).map((k) => (
             <button
@@ -162,7 +158,6 @@ export default function EmployeeLeaveManagement() {
         </div>
       </div>
 
-      {/* SEARCH */}
       <div className="bg-white border rounded-xl p-4">
         <input
           value={search}
@@ -172,7 +167,6 @@ export default function EmployeeLeaveManagement() {
         />
       </div>
 
-      {/* TABLE */}
       <div className="bg-white border rounded-xl overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 border-b text-slate-600">
@@ -190,7 +184,9 @@ export default function EmployeeLeaveManagement() {
                   <div className="font-semibold">{r.leaveType}</div>
                   <div className="text-xs text-slate-500">#{r.id}</div>
                 </td>
-                <td className="px-4 py-3">{r.from} → {r.to}</td>
+                <td className="px-4 py-3">
+                  {r.from} to {r.to}
+                </td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${tone[r.status]}`}>
                     {r.status}
@@ -198,9 +194,22 @@ export default function EmployeeLeaveManagement() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => setViewId(r.id)} className="p-2 hover:bg-slate-100 rounded-lg"><Eye size={16} /></button>
-                    <button onClick={() => openEdit(r)} disabled={r.status !== "Pending"} className="p-2 hover:bg-slate-100 rounded-lg disabled:opacity-40"><Pencil size={16} /></button>
-                    <button onClick={() => setRows(rows.filter(x => x.id !== r.id))} className="p-2 hover:bg-rose-50 text-rose-600 rounded-lg"><Trash2 size={16} /></button>
+                    <button onClick={() => setViewId(r.id)} className="p-2 hover:bg-slate-100 rounded-lg">
+                      <Eye size={16} />
+                    </button>
+                    <button
+                      onClick={() => openEdit(r)}
+                      disabled={r.status !== "Pending"}
+                      className="p-2 hover:bg-slate-100 rounded-lg disabled:opacity-40"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => setRows(rows.filter((x) => x.id !== r.id))}
+                      className="p-2 hover:bg-rose-50 text-rose-600 rounded-lg"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -209,7 +218,6 @@ export default function EmployeeLeaveManagement() {
         </table>
       </div>
 
-      {/* VIEW MODAL – CLEAN CARD */}
       {selectedView && (
         <ModalShell title="Leave Details" onClose={() => setViewId(null)}>
           <div className="space-y-4 text-sm">
@@ -233,7 +241,9 @@ export default function EmployeeLeaveManagement() {
 
             <div className="p-3 border rounded-lg">
               <p className="text-xs text-slate-500">Duration</p>
-              <p className="font-semibold">{selectedView.from} → {selectedView.to}</p>
+              <p className="font-semibold">
+                {selectedView.from} to {selectedView.to}
+              </p>
             </div>
 
             <div className="p-3 border rounded-lg">
@@ -246,19 +256,46 @@ export default function EmployeeLeaveManagement() {
         </ModalShell>
       )}
 
-      {/* CREATE & EDIT MODALS (UNCHANGED STRUCTURE) */}
       {createOpen && (
         <ModalShell title="Create Leave" onClose={() => setCreateOpen(false)}>
           <form onSubmit={createLeave} className="space-y-3">
-            <select value={cType} onChange={(e) => setCType(e.target.value)} className="w-full border rounded-lg px-3 py-2">
-              {leaveTypes.map((t) => <option key={t}>{t}</option>)}
+            <select
+              value={cType}
+              onChange={(e) => setCType(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2"
+            >
+              {leaveTypes.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
             </select>
-            <input type="date" value={cFrom} onChange={(e) => setCFrom(e.target.value)} required className="w-full border rounded-lg px-3 py-2" />
-            <input type="date" value={cTo} onChange={(e) => setCTo(e.target.value)} required className="w-full border rounded-lg px-3 py-2" />
-            <textarea value={cReason} onChange={(e) => setCReason(e.target.value)} required rows={3} className="w-full border rounded-lg px-3 py-2" />
+            <input
+              type="date"
+              value={cFrom}
+              onChange={(e) => setCFrom(e.target.value)}
+              required
+              className="w-full border rounded-lg px-3 py-2"
+            />
+            <input
+              type="date"
+              value={cTo}
+              onChange={(e) => setCTo(e.target.value)}
+              required
+              className="w-full border rounded-lg px-3 py-2"
+            />
+            <textarea
+              value={cReason}
+              onChange={(e) => setCReason(e.target.value)}
+              required
+              rows={3}
+              className="w-full border rounded-lg px-3 py-2"
+            />
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setCreateOpen(false)} className="px-4 py-2 bg-slate-100 rounded-lg">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">Create</button>
+              <button type="button" onClick={() => setCreateOpen(false)} className="px-4 py-2 bg-slate-100 rounded-lg">
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">
+                Create
+              </button>
             </div>
           </form>
         </ModalShell>
@@ -267,15 +304,40 @@ export default function EmployeeLeaveManagement() {
       {selectedEdit && (
         <ModalShell title="Edit Leave" onClose={() => setEditId(null)}>
           <form onSubmit={saveEdit} className="space-y-3">
-            <select value={eType} onChange={(e) => setEType(e.target.value)} className="w-full border rounded-lg px-3 py-2">
-              {leaveTypes.map((t) => <option key={t}>{t}</option>)}
+            <select
+              value={eType}
+              onChange={(e) => setEType(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2"
+            >
+              {leaveTypes.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
             </select>
-            <input type="date" value={eFrom} onChange={(e) => setEFrom(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-            <input type="date" value={eTo} onChange={(e) => setETo(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-            <textarea value={eReason} onChange={(e) => setEReason(e.target.value)} rows={3} className="w-full border rounded-lg px-3 py-2" />
+            <input
+              type="date"
+              value={eFrom}
+              onChange={(e) => setEFrom(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2"
+            />
+            <input
+              type="date"
+              value={eTo}
+              onChange={(e) => setETo(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2"
+            />
+            <textarea
+              value={eReason}
+              onChange={(e) => setEReason(e.target.value)}
+              rows={3}
+              className="w-full border rounded-lg px-3 py-2"
+            />
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setEditId(null)} className="px-4 py-2 bg-slate-100 rounded-lg">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">Save</button>
+              <button type="button" onClick={() => setEditId(null)} className="px-4 py-2 bg-slate-100 rounded-lg">
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">
+                Save
+              </button>
             </div>
           </form>
         </ModalShell>

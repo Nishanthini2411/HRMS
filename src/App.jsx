@@ -2,13 +2,13 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 
-// HR
+/* ================= HR ================= */
 import HrLayout from "./pages/hr/HrLayout";
 import HrHome from "./pages/hr/HrHome";
 import LeaveManagement from "./pages/hr/LeaveManagement";
 import Attendance from "./pages/hr/Attendance";
 
-// ADMIN
+/* ================= ADMIN ================= */
 import DashboardLayout from "./layouts/DashboardLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import Employees from "./pages/admin/Employees.jsx";
@@ -17,26 +17,50 @@ import AdminLeave from "./pages/admin/LeaveManagement.jsx";
 import Payroll from "./pages/admin/Payroll.jsx";
 import Documents from "./pages/admin/Documents.jsx";
 
-// ✅ EMPLOYEE (NEW)
+/* ================= ADMIN HEAD ================= */
+import AdminHeadLayout from "./pages/adminHead/AdminHeadLayout.jsx";
+import AdminHeadDashboard from "./pages/adminHead/AdminHeadDashboard.jsx";
+import AdminHeadApprovals from "./pages/adminHead/AdminHeadApprovals.jsx";
+import AdminHeadAttendanceControl from "./pages/adminHead/AdminHeadAttendanceControl.jsx";
+import AdminHeadLeaveControl from "./pages/adminHead/AdminHeadLeaveControl.jsx";
+import AdminHeadDocumentControl from "./pages/adminHead/AdminHeadDocumentControl.jsx";
+import AdminHeadPayrollAdmin from "./pages/adminHead/AdminHeadPayrollAdmin.jsx";
+import AdminHeadSystemSettings from "./pages/adminHead/AdminHeadSystemSettings.jsx";
+import AdminHeadReports from "./pages/adminHead/AdminHeadReports.jsx";
+import AdminHeadNotifications from "./pages/adminHead/AdminHeadNotifications.jsx";
+
+/* ================= EMPLOYEE ================= */
 import EmployeeLayout from "./pages/employee/EmployeeLayout.jsx";
+import EmployeeDashboard from "./pages/employee/EmployeeDashboard.jsx";
 import EmployeeAttendance from "./pages/employee/EmployeeAttendance.jsx";
 import EmployeeLeaveManagement from "./pages/employee/EmployeeLeaveManagement.jsx";
 import EmployeeDocuments from "./pages/employee/EmployeeDocuments.jsx";
+import MyProfile from "./pages/employee/profile/MyProfile.jsx";
+
+/* EMPLOYEE MENU PAGES */
+import { PayrollPage, SupportPage } from "./pages/employee/EmployeeMenuPages.jsx";
+
+/* REAL EMPLOYEE PAGES */
+import EmployeeNotifications from "./pages/employee/pages/EmployeeNotifications.jsx";
+import EmployeeSettings from "./pages/employee/pages/EmployeeSettings.jsx";
+import PeopleDirectory from "./pages/PeopleDirectory.jsx";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/people" element={<PeopleDirectory />} />
 
-      {/* HR */}
+      {/* ================= HR ================= */}
       <Route path="/hr-dashboard" element={<HrLayout />}>
         <Route index element={<HrHome />} />
         <Route path="leave" element={<LeaveManagement />} />
         <Route path="attendance" element={<Attendance />} />
+        <Route path="people" element={<PeopleDirectory />} />
       </Route>
 
-      {/* ADMIN */}
+      {/* ================= ADMIN ================= */}
       <Route path="/dashboard" element={<DashboardLayout />}>
         <Route index element={<AdminDashboard />} />
         <Route path="employees" element={<Employees />} />
@@ -44,14 +68,42 @@ export default function App() {
         <Route path="leave" element={<AdminLeave />} />
         <Route path="payroll" element={<Payroll />} />
         <Route path="documents" element={<Documents />} />
+        <Route path="people" element={<PeopleDirectory />} />
       </Route>
 
-      {/* ✅ EMPLOYEE */}
+      {/* ================= ADMIN HEAD ================= */}
+      <Route path="/admin-head" element={<AdminHeadLayout />}>
+        <Route index element={<AdminHeadDashboard />} />
+        <Route path="approvals" element={<AdminHeadApprovals />} />
+        <Route path="attendance" element={<AdminHeadAttendanceControl />} />
+        <Route path="leave" element={<AdminHeadLeaveControl />} />
+        <Route path="documents" element={<AdminHeadDocumentControl />} />
+        <Route path="payroll" element={<AdminHeadPayrollAdmin />} />
+        <Route path="settings" element={<AdminHeadSystemSettings />} />
+        <Route path="reports" element={<AdminHeadReports />} />
+        <Route path="notifications" element={<AdminHeadNotifications />} />
+      </Route>
+
+      {/* ================= EMPLOYEE ================= */}
       <Route path="/employee-dashboard" element={<EmployeeLayout />}>
-        <Route index element={<Navigate to="attendance" replace />} />
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<EmployeeDashboard />} />
+        <Route path="profile" element={<MyProfile />} />
         <Route path="attendance" element={<EmployeeAttendance />} />
         <Route path="leave" element={<EmployeeLeaveManagement />} />
         <Route path="documents" element={<EmployeeDocuments />} />
+
+        {/* ✅ Payroll UI like image */}
+        <Route path="payroll" element={<PayrollPage />} />
+
+        {/* REAL NOTIFICATIONS */}
+        <Route path="notifications" element={<EmployeeNotifications />} />
+
+        {/* REAL SETTINGS */}
+        <Route path="settings" element={<EmployeeSettings />} />
+
+        <Route path="support" element={<SupportPage />} />
+        <Route path="people" element={<PeopleDirectory />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />

@@ -2,33 +2,29 @@ import { useEffect, useMemo, useState } from "react";
 import { Clock, CheckCircle2, LogOut, RefreshCcw } from "lucide-react";
 
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
-
 const LS_KEY = (empId) => `HRMS_EMP_ATTENDANCE_${empId}`;
 
-function todayISO() {
+const todayISO = () => {
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
+};
 
-function timeHHMMSS(date = new Date()) {
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
+const timeHHMMSS = (date = new Date()) =>
+  date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-function loadAttendance(empId) {
+const loadAttendance = (empId) => {
   try {
     const raw = localStorage.getItem(LS_KEY(empId));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
-}
+};
 
-function saveAttendance(empId, rows) {
-  localStorage.setItem(LS_KEY(empId), JSON.stringify(rows));
-}
+const saveAttendance = (empId, rows) => localStorage.setItem(LS_KEY(empId), JSON.stringify(rows));
 
 export default function EmployeeAttendance() {
   const [rows, setRows] = useState(() => loadAttendance(EMP.id));
@@ -38,18 +34,13 @@ export default function EmployeeAttendance() {
   }, [rows]);
 
   const today = todayISO();
-
-  const todayRow = useMemo(
-    () => rows.find((r) => r.date === today) || null,
-    [rows, today]
-  );
+  const todayRow = useMemo(() => rows.find((r) => r.date === today) || null, [rows, today]);
 
   const checkedIn = Boolean(todayRow?.checkIn);
   const checkedOut = Boolean(todayRow?.checkOut);
 
   const handleCheckIn = () => {
     if (checkedIn) return;
-
     setRows((prev) => [
       { date: today, checkIn: timeHHMMSS(), checkOut: "", status: "Present" },
       ...prev.filter((r) => r.date !== today),
@@ -58,11 +49,8 @@ export default function EmployeeAttendance() {
 
   const handleCheckOut = () => {
     if (!checkedIn || checkedOut) return;
-
     setRows((prev) =>
-      prev.map((r) =>
-        r.date === today ? { ...r, checkOut: timeHHMMSS() } : r
-      )
+      prev.map((r) => (r.date === today ? { ...r, checkOut: timeHHMMSS() } : r))
     );
   };
 
@@ -73,9 +61,7 @@ export default function EmployeeAttendance() {
     ]);
   };
 
-  const handleResetToday = () => {
-    setRows((prev) => prev.filter((r) => r.date !== today));
-  };
+  const handleResetToday = () => setRows((prev) => prev.filter((r) => r.date !== today));
 
   const stats = useMemo(() => {
     const present = rows.filter((r) => r.status === "Present").length;
@@ -97,9 +83,9 @@ export default function EmployeeAttendance() {
           <div className="flex flex-wrap gap-2">
             <button
               onClick={handleCheckIn}
-              disabled={checkedIn || (todayRow?.status === "Absent")}
+              disabled={checkedIn || todayRow?.status === "Absent"}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                checkedIn || (todayRow?.status === "Absent")
+                checkedIn || todayRow?.status === "Absent"
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-purple-700 text-white hover:bg-purple-800"
               }`}
@@ -110,9 +96,9 @@ export default function EmployeeAttendance() {
 
             <button
               onClick={handleCheckOut}
-              disabled={!checkedIn || checkedOut || (todayRow?.status === "Absent")}
+              disabled={!checkedIn || checkedOut || todayRow?.status === "Absent"}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                !checkedIn || checkedOut || (todayRow?.status === "Absent")
+                !checkedIn || checkedOut || todayRow?.status === "Absent"
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-gray-900 text-white hover:bg-black"
               }`}
