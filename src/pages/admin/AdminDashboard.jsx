@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, CalendarDays, ClipboardList, Wallet, Clock3, ArrowRight, X } from "lucide-react";
+import {
+  Users,
+  CalendarDays,
+  ClipboardList,
+  Wallet,
+  Clock3,
+  ArrowRight,
+  X,
+} from "lucide-react";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -12,7 +20,10 @@ const AdminDashboard = () => {
   const payrollPending = 3;
 
   // ✅ keep same flow, just clamp % so UI won't break when present > total
-  const presentPercentage = Math.min(100, Math.round((presentToday / totalEmployees) * 100));
+  const presentPercentage = Math.min(
+    100,
+    Math.round((presentToday / totalEmployees) * 100)
+  );
 
   // ✅ demo lists for modal (5 employees, 6 present, etc.)
   const employeesList = useMemo(
@@ -57,10 +68,10 @@ const AdminDashboard = () => {
     []
   );
 
-  // ✅ attendance summary (kept same flow)
+  // ✅ attendance summary (NO GREEN)
   const attendanceSummary = useMemo(
     () => [
-      { label: "Present", value: presentToday, color: "bg-emerald-500" },
+      { label: "Present", value: presentToday, color: "bg-sky-500" },
       { label: "Absent", value: Math.max(0, totalEmployees - presentToday), color: "bg-rose-500" },
       { label: "On Leave", value: 0, color: "bg-amber-500" },
     ],
@@ -93,21 +104,74 @@ const AdminDashboard = () => {
     { label: "View Attendance", description: "Check daily attendance report", path: "/dashboard/attendance" },
   ];
 
+  /* ✅ DYNAMIC CARD COLORS (NO GREEN) */
+ // clean enterprise gradients (no harsh rainbow)
+const GRADS = {
+  indigo: "from-indigo-600 to-indigo-800",
+  blue: "from-blue-600 to-blue-800",
+  cyan: "from-cyan-500 to-blue-700",
+  teal: "from-teal-500 to-cyan-700",
+  amber: "from-amber-500 to-orange-700",
+  rose: "from-rose-500 to-rose-700",
+  violet: "from-violet-600 to-purple-800",
+  slate: "from-slate-700 to-slate-900",
+};
+
+const band = (value, steps) => {
+  for (const s of steps) if (value <= s.max) return s.g;
+  return steps[steps.length - 1].g;
+};
+const cardGradients = {
+  // Total Employees – darkest (top layer feel)
+  employees:
+    totalEmployees <= 5
+      ? "from-slate-800 to-slate-700"
+      : totalEmployees <= 20
+      ? "from-slate-900 to-slate-800"
+      : "from-slate-950 to-slate-900",
+
+  // Present Today – mid blue layer
+  present:
+    presentPercentage < 50
+      ? "from-blue-800 to-blue-700"
+      : presentPercentage < 80
+      ? "from-blue-900 to-blue-800"
+      : "from-slate-900 to-blue-900",
+
+  // Pending Leave – slightly warmer blue-slate
+  leave:
+    pendingLeaveRequests <= 1
+      ? "from-slate-700 to-slate-600"
+      : pendingLeaveRequests <= 4
+      ? "from-slate-800 to-slate-700"
+      : "from-slate-900 to-slate-800",
+
+  // Payroll Pending – deepest, serious tone
+  payroll:
+    payrollPending <= 1
+      ? "from-slate-800 to-slate-700"
+      : payrollPending <= 3
+      ? "from-slate-900 to-slate-800"
+      : "from-slate-950 to-slate-900",
+};
+
+
+
   const statCards = [
     {
       id: "employees",
       title: "Total Employees",
-      value: totalEmployees, // ✅ 5
+      value: totalEmployees,
       subtitle: "Active",
-      gradient: "from-indigo-500 via-indigo-400 to-sky-400",
+      gradient: cardGradients.employees,
       icon: Users,
     },
     {
       id: "present",
       title: "Present Today",
-      value: presentToday, // ✅ 6
+      value: presentToday,
       subtitle: "Attendance marked",
-      gradient: "from-emerald-500 via-emerald-400 to-teal-400",
+      gradient: cardGradients.present,
       icon: CalendarDays,
     },
     {
@@ -115,7 +179,7 @@ const AdminDashboard = () => {
       title: "Pending Leave",
       value: pendingLeaveRequests,
       subtitle: "Awaiting approval",
-      gradient: "from-amber-500 via-orange-400 to-yellow-400",
+      gradient: cardGradients.leave,
       icon: ClipboardList,
     },
     {
@@ -123,7 +187,7 @@ const AdminDashboard = () => {
       title: "Payroll Pending",
       value: payrollPending,
       subtitle: "This month",
-      gradient: "from-rose-500 via-pink-500 to-fuchsia-500",
+      gradient: cardGradients.payroll,
       icon: Wallet,
     },
   ];
@@ -142,28 +206,17 @@ const AdminDashboard = () => {
   };
 
   const onStatClick = (cardId) => {
-    if (cardId === "employees") {
-      openView("Employees (5)", "people", employeesList);
-      return;
-    }
-    if (cardId === "present") {
-      openView("Present Today (6)", "people", presentList);
-      return;
-    }
-    if (cardId === "leave") {
-      openView("Pending Leave (4)", "leaves", leaveRequestsList);
-      return;
-    }
-    if (cardId === "payroll") {
-      openView("Payroll Pending (3)", "people", payrollPendingList);
-      return;
-    }
+    if (cardId === "employees") return openView("Employees (5)", "people", employeesList);
+    if (cardId === "present") return openView("Present Today (6)", "people", presentList);
+    if (cardId === "leave") return openView("Pending Leave (4)", "leaves", leaveRequestsList);
+    if (cardId === "payroll") return openView("Payroll Pending (3)", "people", payrollPendingList);
   };
 
   return (
     <section className="min-h-screen bg-slate-50 px-4 py-6 md:px-8">
       <header className="mb-6">
-        <div className="overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-sky-500 to-emerald-400 p-5 text-white shadow-lg">
+        {/* ✅ HEADER (NO GREEN) */}
+        <div className="overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-700 via-sky-600 to-violet-600 p-5 text-white shadow-lg">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="space-y-1">
               <h1 className="text-2xl sm:text-3xl font-semibold leading-tight">Admin Dashboard</h1>
@@ -210,7 +263,8 @@ const AdminDashboard = () => {
             </div>
 
             <div className="mb-4 h-3 w-full overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${presentPercentage}%` }} />
+              {/* ✅ NO GREEN */}
+              <div className="h-full bg-sky-500 transition-all" style={{ width: `${presentPercentage}%` }} />
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3 text-xs">

@@ -123,6 +123,36 @@ function uid(prefix) {
   return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
+// Demo profile data for MyProfile page
+export const employeeProfile = {
+  name: "Priya Sharma",
+  id: "EMP-001",
+  avatar: "https://i.pravatar.cc/150?img=47",
+  personal: {
+    dob: "1992-05-18",
+    email: "priya.sharma@example.com",
+    phone: "+91 98765 43210",
+    address: "502, Orchid Residency, Pune, MH",
+  },
+  job: {
+    employeeId: "EMP-001",
+    title: "Senior HR Executive",
+    department: "Human Resources",
+    manager: "Rohan Kulkarni",
+    joiningDate: "2021-07-12",
+    workMode: "Hybrid",
+    location: "Pune, IN",
+  },
+  emergencyContacts: [
+    { name: "Anita Sharma", relation: "Mother", phone: "+91 98220 11122" },
+    { name: "Ravi Sharma", relation: "Brother", phone: "+91 99220 33344" },
+  ],
+  idProofs: [
+    { type: "Aadhar", number: "XXXX-XXXX-1234", status: "Verified" },
+    { type: "PAN", number: "ABCDE1234F", status: "Pending" },
+  ],
+};
+
 export function useEmployeeDashboard() {
   const [data, setData] = useState(() => load());
   const [activeAction, setActiveAction] = useState(null);

@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
 
+/* ---------------- CONSTANTS ---------------- */
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
 const LS_KEY = (empId) => `HRMS_EMP_LEAVES_${empId}`;
-const leaveTypes = ["Casual Leave", "Sick Leave", "Annual Leave", "Work From Home", "Other"];
+
+const leaveTypes = [
+  "Casual Leave",
+  "Sick Leave",
+  "Annual Leave",
+  "Work From Home",
+  "Other",
+];
+
+const leaveModes = ["Full Day", "Half Day", "Permission"];
 
 const tone = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",
@@ -13,6 +23,7 @@ const tone = {
 
 const uid = () => `LR-${Math.floor(1000 + Math.random() * 9000)}`;
 
+/* ---------------- HELPERS ---------------- */
 const loadLeaves = (id) => {
   try {
     const raw = localStorage.getItem(LS_KEY(id));
@@ -22,15 +33,34 @@ const loadLeaves = (id) => {
   }
 };
 
-const saveLeaves = (id, rows) => localStorage.setItem(LS_KEY(id), JSON.stringify(rows));
+const saveLeaves = (id, rows) =>
+  localStorage.setItem(LS_KEY(id), JSON.stringify(rows));
+
 const fmt = (iso) => new Date(iso).toLocaleString();
 
+/* ⏱ TIME DURATION CALC */
+const calcDuration = (from, to) => {
+  if (!from || !to) return "";
+  const [fh, fm] = from.split(":").map(Number);
+  const [th, tm] = to.split(":").map(Number);
+  const diff = th * 60 + tm - (fh * 60 + fm);
+  if (diff <= 0) return "";
+  const h = Math.floor(diff / 60);
+  const m = diff % 60;
+  return `${h ? `${h} Hour${h > 1 ? "s" : ""}` : ""}${h && m ? " " : ""}${
+    m ? `${m} Minutes` : ""
+  }`;
+};
+
+const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
+
+/* ---------------- MODAL ---------------- */
 const ModalShell = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
     <div className="w-full max-w-xl bg-white rounded-2xl shadow-xl">
-      <div className="px-5 py-4 border-b flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900">{title}</h3>
-        <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100">
+      <div className="px-5 py-4 border-b flex justify-between items-center">
+        <h3 className="font-semibold">{title}</h3>
+        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg">
           <X size={18} />
         </button>
       </div>
@@ -39,20 +69,30 @@ const ModalShell = ({ title, onClose, children }) => (
   </div>
 );
 
+/* ---------------- MAIN ---------------- */
 export default function EmployeeLeaveManagement() {
   const [rows, setRows] = useState(() => loadLeaves(EMP.id));
+
   const [viewId, setViewId] = useState(null);
   const [editId, setEditId] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
 
+  /* CREATE */
   const [cType, setCType] = useState("Casual Leave");
+  const [cMode, setCMode] = useState("Full Day");
   const [cFrom, setCFrom] = useState("");
   const [cTo, setCTo] = useState("");
+  const [cFromTime, setCFromTime] = useState("");
+  const [cToTime, setCToTime] = useState("");
   const [cReason, setCReason] = useState("");
 
+  /* EDIT */
   const [eType, setEType] = useState("");
+  const [eMode, setEMode] = useState("");
   const [eFrom, setEFrom] = useState("");
   const [eTo, setETo] = useState("");
+  const [eFromTime, setEFromTime] = useState("");
+  const [eToTime, setEToTime] = useState("");
   const [eReason, setEReason] = useState("");
 
   const [statusFilter, setStatusFilter] = useState("All");
@@ -77,7 +117,12 @@ export default function EmployeeLeaveManagement() {
     if (statusFilter !== "All") list = list.filter((r) => r.status === statusFilter);
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter((r) => r.id.toLowerCase().includes(q) || r.leaveType.toLowerCase().includes(q));
+      list = list.filter(
+        (r) =>
+          r.id.toLowerCase().includes(q) ||
+          r.leaveType.toLowerCase().includes(q) ||
+          (r.mode || "").toLowerCase().includes(q)
+      );
     }
     return list.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
   }, [rows, statusFilter, search]);
@@ -85,71 +130,120 @@ export default function EmployeeLeaveManagement() {
   const selectedView = rows.find((r) => r.id === viewId);
   const selectedEdit = rows.find((r) => r.id === editId);
 
+  /* CREATE */
   const createLeave = (e) => {
     e.preventDefault();
+
+    const hours = needsTime(cMode) ? calcDuration(cFromTime, cToTime) : "";
+
     setRows((p) => [
       {
         id: uid(),
         employeeId: EMP.id,
         employeeName: EMP.name,
         leaveType: cType,
+        mode: cMode,
         from: cFrom,
-        to: cTo,
+        to: cMode === "Full Day" ? cTo : cFrom,
+        timeFrom: needsTime(cMode) ? cFromTime : "",
+        timeTo: needsTime(cMode) ? cToTime : "",
+        hours: needsTime(cMode) ? hours : "",
         reason: cReason,
         status: "Pending",
         appliedAt: new Date().toISOString(),
       },
       ...p,
     ]);
+
     setCreateOpen(false);
     setCFrom("");
     setCTo("");
+    setCFromTime("");
+    setCToTime("");
     setCReason("");
   };
 
+  /* EDIT */
   const openEdit = (r) => {
     setEditId(r.id);
     setEType(r.leaveType);
-    setEFrom(r.from);
-    setETo(r.to);
-    setEReason(r.reason);
+    setEMode(r.mode || "Full Day");
+    setEFrom(r.from || "");
+    setETo(r.to || "");
+    setEFromTime(r.timeFrom || "");
+    setEToTime(r.timeTo || "");
+    setEReason(r.reason || "");
   };
 
   const saveEdit = (e) => {
     e.preventDefault();
+
     setRows((p) =>
       p.map((r) =>
-        r.id === editId ? { ...r, leaveType: eType, from: eFrom, to: eTo, reason: eReason } : r
+        r.id === editId
+          ? {
+              ...r,
+              leaveType: eType,
+              mode: eMode,
+              from: eFrom,
+              to: eMode === "Full Day" ? eTo : eFrom,
+              timeFrom: needsTime(eMode) ? eFromTime : "",
+              timeTo: needsTime(eMode) ? eToTime : "",
+              hours: needsTime(eMode) ? calcDuration(eFromTime, eToTime) : "",
+              reason: eReason,
+            }
+          : r
       )
     );
+
     setEditId(null);
   };
 
+  const TimePreset = ({ onMorning, onAfternoon }) => (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        onClick={onMorning}
+        className="px-3 py-1.5 text-xs rounded-full border bg-white hover:bg-slate-50"
+      >
+        Morning (09:00 - 13:00)
+      </button>
+      <button
+        type="button"
+        onClick={onAfternoon}
+        className="px-3 py-1.5 text-xs rounded-full border bg-white hover:bg-slate-50"
+      >
+        Afternoon (13:00 - 17:00)
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
+      {/* HEADER */}
       <div className="bg-slate-800 text-white rounded-2xl p-5">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between">
           <div>
             <h2 className="text-xl font-semibold">Leave Management</h2>
-            <p className="text-sm text-slate-300">Employee self service</p>
+            <p className="text-sm text-slate-300">
+              Full Day · Half Day (Time) · Permission (Time Based)
+            </p>
           </div>
           <button
             onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-slate-800 font-semibold hover:bg-slate-100"
+            className="bg-white text-slate-800 px-4 py-2 rounded-lg flex gap-2"
           >
             <Plus size={16} /> New Leave
           </button>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2 text-xs">
+        <div className="mt-4 flex gap-2 flex-wrap text-xs">
           {Object.keys(stats).map((k) => (
             <button
               key={k}
               onClick={() => setStatusFilter(k)}
-              className={`px-3 py-1 rounded-full border transition ${
-                statusFilter === k
-                  ? "bg-white text-slate-800"
-                  : "bg-white/10 text-white hover:bg-white/20"
+              className={`px-3 py-1 rounded-full border ${
+                statusFilter === k ? "bg-white text-slate-800" : "bg-white/10 text-white"
               }`}
             >
               {k}: {stats[k]}
@@ -158,55 +252,79 @@ export default function EmployeeLeaveManagement() {
         </div>
       </div>
 
+      {/* SEARCH */}
       <div className="bg-white border rounded-xl p-4">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search leave requests..."
+          placeholder="Search leave..."
           className="w-full border rounded-lg px-3 py-2 text-sm"
         />
       </div>
 
+      {/* TABLE */}
       <div className="bg-white border rounded-xl overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 border-b text-slate-600">
+          <thead className="bg-slate-50 border-b">
             <tr>
               <th className="px-4 py-3 text-left">Leave</th>
-              <th className="px-4 py-3">Dates</th>
+              <th className="px-4 py-3">Duration</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
+
           <tbody className="divide-y">
             {filtered.map((r) => (
               <tr key={r.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3">
                   <div className="font-semibold">{r.leaveType}</div>
-                  <div className="text-xs text-slate-500">#{r.id}</div>
+                  <div className="text-xs text-slate-500">
+                    #{r.id} • {r.mode}
+                    {needsTime(r.mode) && r.hours ? ` • ${r.hours}` : ""}
+                  </div>
                 </td>
+
                 <td className="px-4 py-3">
-                  {r.from} to {r.to}
+                  {r.from}
+                  {r.mode === "Full Day" ? ` → ${r.to}` : ""}
+                  {needsTime(r.mode) && r.timeFrom && r.timeTo ? (
+                    <div className="text-xs text-slate-500 mt-1">
+                      {r.timeFrom} → {r.timeTo}
+                      {r.hours ? ` • ${r.hours}` : ""}
+                    </div>
+                  ) : null}
                 </td>
+
                 <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${tone[r.status]}`}>
+                  <span className={`px-2 py-1 rounded-full border text-xs ${tone[r.status]}`}>
                     {r.status}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+
+                <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => setViewId(r.id)} className="p-2 hover:bg-slate-100 rounded-lg">
+                    <button
+                      onClick={() => setViewId(r.id)}
+                      className="p-2 hover:bg-slate-100 rounded-lg"
+                      title="View"
+                    >
                       <Eye size={16} />
                     </button>
+
                     <button
-                      onClick={() => openEdit(r)}
                       disabled={r.status !== "Pending"}
+                      onClick={() => openEdit(r)}
                       className="p-2 hover:bg-slate-100 rounded-lg disabled:opacity-40"
+                      title="Edit"
                     >
                       <Pencil size={16} />
                     </button>
+
                     <button
-                      onClick={() => setRows(rows.filter((x) => x.id !== r.id))}
+                      onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
                       className="p-2 hover:bg-rose-50 text-rose-600 rounded-lg"
+                      title="Delete"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -214,10 +332,19 @@ export default function EmployeeLeaveManagement() {
                 </td>
               </tr>
             ))}
+
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                  No leave requests found.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
+      {/* VIEW MODAL */}
       {selectedView && (
         <ModalShell title="Leave Details" onClose={() => setViewId(null)}>
           <div className="space-y-4 text-sm">
@@ -225,10 +352,14 @@ export default function EmployeeLeaveManagement() {
               <div className="p-3 border rounded-lg">
                 <p className="text-xs text-slate-500">Employee</p>
                 <p className="font-semibold">{EMP.name}</p>
+                <p className="text-xs text-slate-500 mt-1">{EMP.id}</p>
               </div>
+
               <div className="p-3 border rounded-lg">
                 <p className="text-xs text-slate-500">Status</p>
-                <span className={`inline-block mt-1 px-2 py-1 rounded-full border text-xs font-semibold ${tone[selectedView.status]}`}>
+                <span
+                  className={`inline-block mt-1 px-2 py-1 rounded-full border text-xs font-semibold ${tone[selectedView.status]}`}
+                >
                   {selectedView.status}
                 </span>
               </div>
@@ -239,16 +370,33 @@ export default function EmployeeLeaveManagement() {
               <p className="font-semibold">{selectedView.leaveType}</p>
             </div>
 
-            <div className="p-3 border rounded-lg">
-              <p className="text-xs text-slate-500">Duration</p>
-              <p className="font-semibold">
-                {selectedView.from} to {selectedView.to}
-              </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 border rounded-lg">
+                <p className="text-xs text-slate-500">Mode</p>
+                <p className="font-semibold">{selectedView.mode}</p>
+              </div>
+
+              <div className="p-3 border rounded-lg">
+                <p className="text-xs text-slate-500">Duration</p>
+                <p className="font-semibold">
+                  {selectedView.from}
+                  {selectedView.mode === "Full Day" ? ` → ${selectedView.to}` : ""}
+                </p>
+
+                {needsTime(selectedView.mode) &&
+                  selectedView.timeFrom &&
+                  selectedView.timeTo && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      {selectedView.timeFrom} → {selectedView.timeTo}
+                      {selectedView.hours ? ` • ${selectedView.hours}` : ""}
+                    </p>
+                  )}
+              </div>
             </div>
 
             <div className="p-3 border rounded-lg">
               <p className="text-xs text-slate-500">Reason</p>
-              <p>{selectedView.reason}</p>
+              <p>{selectedView.reason || "-"}</p>
             </div>
 
             <p className="text-xs text-slate-400">Applied at {fmt(selectedView.appliedAt)}</p>
@@ -256,8 +404,9 @@ export default function EmployeeLeaveManagement() {
         </ModalShell>
       )}
 
+      {/* CREATE MODAL */}
       {createOpen && (
-        <ModalShell title="Create Leave" onClose={() => setCreateOpen(false)}>
+        <ModalShell title="Apply Leave" onClose={() => setCreateOpen(false)}>
           <form onSubmit={createLeave} className="space-y-3">
             <select
               value={cType}
@@ -268,6 +417,29 @@ export default function EmployeeLeaveManagement() {
                 <option key={t}>{t}</option>
               ))}
             </select>
+
+            <select
+              value={cMode}
+              onChange={(e) => {
+                const next = e.target.value;
+                setCMode(next);
+
+                // Full day -> date range, clear times
+                if (next === "Full Day") {
+                  setCFromTime("");
+                  setCToTime("");
+                } else {
+                  // Half Day / Permission -> single date
+                  setCTo("");
+                }
+              }}
+              className="w-full border rounded-lg px-3 py-2"
+            >
+              {leaveModes.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+
             <input
               type="date"
               value={cFrom}
@@ -275,32 +447,82 @@ export default function EmployeeLeaveManagement() {
               required
               className="w-full border rounded-lg px-3 py-2"
             />
-            <input
-              type="date"
-              value={cTo}
-              onChange={(e) => setCTo(e.target.value)}
-              required
-              className="w-full border rounded-lg px-3 py-2"
-            />
+
+            {cMode === "Full Day" && (
+              <input
+                type="date"
+                value={cTo}
+                onChange={(e) => setCTo(e.target.value)}
+                required
+                className="w-full border rounded-lg px-3 py-2"
+              />
+            )}
+
+            {/* ✅ Half Day + Permission -> time */}
+            {needsTime(cMode) && (
+              <>
+                <TimePreset
+                  onMorning={() => {
+                    setCFromTime("09:00");
+                    setCToTime("13:00");
+                  }}
+                  onAfternoon={() => {
+                    setCFromTime("13:00");
+                    setCToTime("17:00");
+                  }}
+                />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="time"
+                    value={cFromTime}
+                    onChange={(e) => setCFromTime(e.target.value)}
+                    required
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                  <input
+                    type="time"
+                    value={cToTime}
+                    onChange={(e) => setCToTime(e.target.value)}
+                    required
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+
+                {calcDuration(cFromTime, cToTime) && (
+                  <div className="text-sm bg-slate-50 border rounded-lg p-2">
+                    ⏱ Duration: <b>{calcDuration(cFromTime, cToTime)}</b>
+                  </div>
+                )}
+              </>
+            )}
+
             <textarea
               value={cReason}
               onChange={(e) => setCReason(e.target.value)}
-              required
               rows={3}
+              required
               className="w-full border rounded-lg px-3 py-2"
+              placeholder="Reason"
             />
+
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setCreateOpen(false)} className="px-4 py-2 bg-slate-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                className="px-4 py-2 bg-slate-100 rounded-lg"
+              >
                 Cancel
               </button>
               <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">
-                Create
+                Apply
               </button>
             </div>
           </form>
         </ModalShell>
       )}
 
+      {/* EDIT MODAL */}
       {selectedEdit && (
         <ModalShell title="Edit Leave" onClose={() => setEditId(null)}>
           <form onSubmit={saveEdit} className="space-y-3">
@@ -313,26 +535,97 @@ export default function EmployeeLeaveManagement() {
                 <option key={t}>{t}</option>
               ))}
             </select>
+
+            <select
+              value={eMode}
+              onChange={(e) => {
+                const next = e.target.value;
+                setEMode(next);
+                if (next !== "Full Day") setETo("");
+                if (next === "Full Day") {
+                  setEFromTime("");
+                  setEToTime("");
+                }
+              }}
+              className="w-full border rounded-lg px-3 py-2"
+            >
+              {leaveModes.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+
             <input
               type="date"
               value={eFrom}
               onChange={(e) => setEFrom(e.target.value)}
+              required
               className="w-full border rounded-lg px-3 py-2"
             />
-            <input
-              type="date"
-              value={eTo}
-              onChange={(e) => setETo(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2"
-            />
+
+            {eMode === "Full Day" && (
+              <input
+                type="date"
+                value={eTo}
+                onChange={(e) => setETo(e.target.value)}
+                required
+                className="w-full border rounded-lg px-3 py-2"
+              />
+            )}
+
+            {/* ✅ Half Day + Permission -> time */}
+            {needsTime(eMode) && (
+              <>
+                <TimePreset
+                  onMorning={() => {
+                    setEFromTime("09:00");
+                    setEToTime("13:00");
+                  }}
+                  onAfternoon={() => {
+                    setEFromTime("13:00");
+                    setEToTime("17:00");
+                  }}
+                />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="time"
+                    value={eFromTime}
+                    onChange={(e) => setEFromTime(e.target.value)}
+                    required
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                  <input
+                    type="time"
+                    value={eToTime}
+                    onChange={(e) => setEToTime(e.target.value)}
+                    required
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+
+                {calcDuration(eFromTime, eToTime) && (
+                  <div className="text-sm bg-slate-50 border rounded-lg p-2">
+                    ⏱ Duration: <b>{calcDuration(eFromTime, eToTime)}</b>
+                  </div>
+                )}
+              </>
+            )}
+
             <textarea
               value={eReason}
               onChange={(e) => setEReason(e.target.value)}
               rows={3}
+              required
               className="w-full border rounded-lg px-3 py-2"
+              placeholder="Reason"
             />
+
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setEditId(null)} className="px-4 py-2 bg-slate-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setEditId(null)}
+                className="px-4 py-2 bg-slate-100 rounded-lg"
+              >
                 Cancel
               </button>
               <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">

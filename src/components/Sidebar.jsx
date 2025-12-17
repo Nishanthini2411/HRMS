@@ -11,7 +11,7 @@ const Sidebar = () => {
   return (
     <aside className="w-64 bg-white border-r shadow-sm flex flex-col h-screen sticky top-0">
       <div className="p-5 border-b">
-        <h1 className="text-xl font-bold text-blue-700">HRMS</h1>
+        <h1 className="text-xl font-bold text-blue-700">TWITE HRMS</h1>
       </div>
       <nav className="p-4 flex-1 space-y-1">
         <NavLink to="/dashboard" end className={linkClasses}>
@@ -29,11 +29,8 @@ const Sidebar = () => {
         <NavLink to="/dashboard/payroll" className={linkClasses}>
           Payroll
         </NavLink>
-        <NavLink to="/dashboard/documents" className={linkClasses}>
-          Documents
-        </NavLink>
         <NavLink to="/dashboard/people" className={linkClasses}>
-          People Directory
+          Birthday
         </NavLink>
       </nav>
       <div className="p-4 border-t text-xs text-gray-400">

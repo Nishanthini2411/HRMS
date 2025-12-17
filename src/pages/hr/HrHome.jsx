@@ -186,24 +186,26 @@ const StatCard = ({
   <button
     type="button"
     onClick={onClick}
-    className="text-left w-full relative overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:shadow-md hover:-translate-y-[1px] active:translate-y-0"
+    className="text-left w-full relative overflow-hidden rounded-2xl border bg-white shadow-sm transition hover:shadow-md hover:-translate-y-[1px] active:translate-y-0"
   >
     <div className={`absolute inset-0 bg-gradient-to-br ${accent} opacity-[0.08]`} />
-    <div className="relative p-5">
-      <div className="flex items-start justify-between gap-3">
+    <div className="relative p-4">
+      <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-xs font-semibold text-slate-500">{title}</div>
-          <div className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900">
+          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+            {title}
+          </div>
+          <div className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900">
             {value}
           </div>
-          {sub ? <div className="mt-2 text-sm text-slate-600">{sub}</div> : null}
-          <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-slate-500">
+          {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
+          <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
             <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
             Click to view
           </div>
         </div>
-        <div className="p-2.5 rounded-2xl bg-white/70 border border-slate-200 shadow-sm">
-          <Icon size={18} className="text-slate-800" />
+        <div className="p-2 rounded-xl bg-white/70 border border-slate-200 shadow-sm">
+          <Icon size={16} className="text-slate-800" />
         </div>
       </div>
     </div>
@@ -455,15 +457,15 @@ export default function HrHome() {
   return (
     <section className="space-y-6">
       {/* HEADER */}
-      <div className="relative overflow-hidden rounded-[28px] border bg-white shadow-sm">
+      <div className="relative overflow-hidden rounded-2xl border bg-white shadow-sm">
         <div className="absolute inset-0">
           <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-emerald-500 to-amber-500 opacity-[0.10]" />
-          <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-indigo-500/10 blur-3xl" />
-          <div className="absolute -bottom-28 -right-28 w-[520px] h-[520px] rounded-full bg-emerald-500/10 blur-3xl" />
+          <div className="absolute -top-16 -left-16 w-[320px] h-[320px] rounded-full bg-indigo-500/10 blur-2xl" />
+          <div className="absolute -bottom-20 -right-20 w-[380px] h-[380px] rounded-full bg-emerald-500/10 blur-2xl" />
         </div>
 
-        <div className="relative p-6 sm:p-8">
-          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="relative p-5 sm:p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               {/* <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-white/70 text-slate-700 text-xs font-semibold">
                 <Sparkles size={14} className="text-indigo-600" />
@@ -549,7 +551,7 @@ export default function HrHome() {
       </div>
 
       {/* STATS (CLICKABLE) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <StatCard
           title="Employees"
           value={counts.emp}

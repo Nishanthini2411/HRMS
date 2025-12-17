@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Mail,
@@ -65,7 +65,6 @@ function Avatar({ name }) {
 
 /* ---------------- MAIN ---------------- */
 export default function PeopleDirectory() {
-  const [selected, setSelected] = useState(employees[0]);
   const [query, setQuery] = useState("");
 
   const list = useMemo(() => {
@@ -73,8 +72,19 @@ export default function PeopleDirectory() {
       .map((e) => ({ ...e, days: daysUntilBirthday(e.dob) }))
       .filter((e) =>
         `${e.name} ${e.department}`.toLowerCase().includes(query.toLowerCase())
-      );
+      )
+      .sort((a, b) => a.days - b.days || a.name.localeCompare(b.name));
   }, [query]);
+
+  const [selected, setSelected] = useState(() => list[0]);
+
+  useEffect(() => {
+    if (!list.length) return;
+    const stillVisible = selected && list.find((e) => e.id === selected.id);
+    if (!stillVisible) {
+      setSelected(list[0]);
+    }
+  }, [list, selected]);
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">

@@ -7,6 +7,8 @@ import HrLayout from "./pages/hr/HrLayout";
 import HrHome from "./pages/hr/HrHome";
 import LeaveManagement from "./pages/hr/LeaveManagement";
 import Attendance from "./pages/hr/Attendance";
+import HrNotifications from "./pages/hr/HrNotifications";
+import HrProfile from "./pages/hr/HrProfile";
 
 /* ================= ADMIN ================= */
 import DashboardLayout from "./layouts/DashboardLayout";
@@ -15,7 +17,8 @@ import Employees from "./pages/admin/Employees.jsx";
 import AdminAttendance from "./pages/admin/Attendance.jsx";
 import AdminLeave from "./pages/admin/LeaveManagement.jsx";
 import Payroll from "./pages/admin/Payroll.jsx";
-import Documents from "./pages/admin/Documents.jsx";
+import AdminNotifications from "./pages/admin/AdminNotifications.jsx";
+import AdminProfile from "./pages/admin/AdminProfile.jsx";
 
 /* ================= ADMIN HEAD ================= */
 import AdminHeadLayout from "./pages/adminHead/AdminHeadLayout.jsx";
@@ -34,7 +37,6 @@ import EmployeeLayout from "./pages/employee/EmployeeLayout.jsx";
 import EmployeeDashboard from "./pages/employee/EmployeeDashboard.jsx";
 import EmployeeAttendance from "./pages/employee/EmployeeAttendance.jsx";
 import EmployeeLeaveManagement from "./pages/employee/EmployeeLeaveManagement.jsx";
-import EmployeeDocuments from "./pages/employee/EmployeeDocuments.jsx";
 import MyProfile from "./pages/employee/profile/MyProfile.jsx";
 
 /* EMPLOYEE MENU PAGES */
@@ -57,6 +59,8 @@ export default function App() {
         <Route index element={<HrHome />} />
         <Route path="leave" element={<LeaveManagement />} />
         <Route path="attendance" element={<Attendance />} />
+        <Route path="notifications" element={<HrNotifications />} />
+        <Route path="profile" element={<HrProfile />} />
         <Route path="people" element={<PeopleDirectory />} />
       </Route>
 
@@ -67,7 +71,8 @@ export default function App() {
         <Route path="attendance" element={<AdminAttendance />} />
         <Route path="leave" element={<AdminLeave />} />
         <Route path="payroll" element={<Payroll />} />
-        <Route path="documents" element={<Documents />} />
+        <Route path="notifications" element={<AdminNotifications />} />
+        <Route path="profile" element={<AdminProfile />} />
         <Route path="people" element={<PeopleDirectory />} />
       </Route>
 
@@ -91,7 +96,6 @@ export default function App() {
         <Route path="profile" element={<MyProfile />} />
         <Route path="attendance" element={<EmployeeAttendance />} />
         <Route path="leave" element={<EmployeeLeaveManagement />} />
-        <Route path="documents" element={<EmployeeDocuments />} />
 
         {/* ✅ Payroll UI like image */}
         <Route path="payroll" element={<PayrollPage />} />

@@ -41,7 +41,7 @@ const items = [
   { to: "/admin-head/settings", icon: Settings, label: "System Settings" },
   { to: "/admin-head/reports", icon: BarChart3, label: "Reports" },
   { to: "/admin-head/notifications", icon: Bell, label: "Notifications" },
-  { to: "/people", icon: UserRound, label: "People Directory" },
+  { to: "/people", icon: UserRound, label: "Birthday" },
 ];
 
 export default function AdminHeadLayout() {
