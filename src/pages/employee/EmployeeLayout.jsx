@@ -3,13 +3,11 @@ import {
   Bell,
   CalendarDays,
   ClipboardCheck,
-  HelpCircle,
   LayoutDashboard,
   LogOut,
   Settings,
   UserCircle2,
-  WalletCards,
-  UserRound,
+  FileText,
 } from "lucide-react";
 
 const SideItem = ({ to, icon: Icon, label, end }) => (
@@ -33,7 +31,7 @@ const tabs = [
   { to: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "attendance", icon: ClipboardCheck, label: "Attendance" },
   { to: "leave", icon: CalendarDays, label: "Leave" },
-  { to: "payroll", icon: WalletCards, label: "Payroll" },
+  { to: "payslips", icon: FileText, label: "Payslips" },
   { to: "settings", icon: Settings, label: "Settings" },
   // { to: "/employee-dashboard/people", icon: UserRound, label: "People Directory" },
 ];
@@ -50,8 +48,8 @@ export default function EmployeeLayout() {
       <aside className="w-[280px] bg-white border-r sticky top-0 h-screen">
         <div className="h-full flex flex-col">
           <div className="p-5 border-b">
-            <div className="text-xl font-extrabold text-gray-900">Employee</div>
-            <div className="text-xs text-gray-500 mt-1">Self Service Workspace</div>
+            <div className="text-xl font-extrabold text-gray-900">TWITE HRMS</div>
+            {/* <div className="text-xs text-gray-500 mt-1">Self Service Workspace</div> */}
           </div>
 
           <nav className="p-4 space-y-2 flex-1 overflow-y-auto">

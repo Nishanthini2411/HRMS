@@ -165,7 +165,7 @@ function EmptyState() {
   );
 }
 
-/** ✅ Header stat cards (active card should NOT become white) */
+/** ✅ Stat cards unchanged (original) */
 function StatCard({ icon: Icon, label, value, active, onClick }) {
   return (
     <button
@@ -178,7 +178,12 @@ function StatCard({ icon: Icon, label, value, active, onClick }) {
       )}
     >
       <div className="flex items-center gap-3">
-        <div className={cn("h-11 w-11 rounded-2xl grid place-items-center border", active ? "bg-white/10 border-white/20" : "bg-white/10 border-white/15")}>
+        <div
+          className={cn(
+            "h-11 w-11 rounded-2xl grid place-items-center border",
+            active ? "bg-white/10 border-white/20" : "bg-white/10 border-white/15"
+          )}
+        >
           <Icon size={18} className="text-white" />
         </div>
         <div className="min-w-0">
@@ -190,7 +195,7 @@ function StatCard({ icon: Icon, label, value, active, onClick }) {
   );
 }
 
-/* ===================== ROW (NO View details) ===================== */
+/* ===================== ROW (original) ===================== */
 function NotificationRow({
   n,
   selected,
@@ -262,7 +267,6 @@ function NotificationRow({
               </div>
             </div>
 
-            {/* actions (NO Next, NO View details) */}
             <div className="flex flex-col items-end gap-2 shrink-0">
               <div className="flex items-center gap-2">
                 <button
@@ -294,8 +298,6 @@ function NotificationRow({
               </div>
             </div>
           </div>
-
-          {/* ✅ no expanded section */}
         </div>
       </div>
     </div>
@@ -310,23 +312,25 @@ export default function AdminNotifications() {
   const [items, setItems] = useState(initial);
 
   const [q, setQ] = useState("");
-  const [type, setType] = useState("All"); // All | success | warning | info
-  const [source, setSource] = useState("All"); // All | module name
-  const [status, setStatus] = useState("All"); // All | Unread | Read
+  const [type, setType] = useState("All");
+  const [source, setSource] = useState("All");
+  const [status, setStatus] = useState("All");
 
   const [selected, setSelected] = useState(() => new Set());
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
-
     return items
       .filter((n) => ALLOWED_SOURCES.includes(n.source))
       .filter((n) => {
         const typeOk = type === "All" ? true : n.type === type;
         const sourceOk = source === "All" ? true : n.source === source;
-
         const statusOk =
-          status === "All" ? true : status === "Unread" ? n.unread === true : n.unread === false;
+          status === "All"
+            ? true
+            : status === "Unread"
+            ? n.unread === true
+            : n.unread === false;
 
         const text = `${n.title} ${n.detail} ${n.source} ${n.time}`.toLowerCase();
         const qOk = !query ? true : text.includes(query);
@@ -357,7 +361,6 @@ export default function AdminNotifications() {
   };
 
   const clearSelection = () => setSelected(new Set());
-
   const selectAllFiltered = () => setSelected(() => new Set(filtered.map((x) => x.id)));
 
   const markRead = (ids) => {
@@ -380,8 +383,6 @@ export default function AdminNotifications() {
     });
   };
 
-  const markAllRead = () => setItems((prev) => prev.map((x) => ({ ...x, unread: false })));
-
   const goToSource = (n) => {
     const route = n.route || SOURCE_ROUTE[n.source] || "/admin";
     navigate(route, { state: { fromNotification: n, notifId: n.id } });
@@ -389,22 +390,23 @@ export default function AdminNotifications() {
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
-      <div className="rounded-3xl border bg-gradient-to-b from-slate-900 to-slate-800 text-white p-6 shadow-sm">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      {/* ✅ HEADER BIG CARD color changed to image color */}
+ <div className="rounded-3xl border bg-[#464975] text-white p-6 shadow-sm relative overflow-hidden">        {/* subtle glow like your sample */}
+        <div className="absolute -top-16 -left-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -bottom-20 -right-20 h-72 w-72 rounded-full bg-white/10 blur-2xl" />
+
+        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-wider text-white/70">Admin Console</p>
+            <p className="text-xs uppercase tracking-wider text-white/85">Admin Console</p>
             <h1 className="text-2xl font-bold mt-1">Notifications</h1>
-            <p className="text-sm text-white/70 mt-1">
+            <p className="text-sm text-white/85 mt-1">
               Shows only: Employees, Attendance, LeaveManagement, Payroll, Documents, My Profile, Birthday.
             </p>
           </div>
-
-          {/* ✅ Removed button above Read card (Mark all read removed) */}
         </div>
 
-        {/* ✅ Clickable cards (active should NOT be white) */}
-        <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* ✅ 3 stat cards unchanged */}
+        <div className="relative mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
           <StatCard
             icon={Bell}
             label="Total"
@@ -450,7 +452,6 @@ export default function AdminNotifications() {
               </div>
             </div>
 
-            {/* type chips */}
             <div className="flex flex-wrap items-center gap-2">
               <Chip active={type === "All"} onClick={() => setType("All")}>
                 All ({counts.total})
@@ -467,7 +468,6 @@ export default function AdminNotifications() {
             </div>
           </div>
 
-          {/* source chips */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Chip active={source === "All"} onClick={() => setSource("All")}>
               All Modules
@@ -479,11 +479,10 @@ export default function AdminNotifications() {
             ))}
           </div>
 
-          {/* Bulk actions */}
           <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2">
               <button
-                onClick={selectAllFiltered}
+                onClick={() => setSelected(() => new Set(filtered.map((x) => x.id)))}
                 className="text-xs font-semibold rounded-full border px-3 py-1.5 hover:bg-slate-50"
               >
                 Select all (filtered)

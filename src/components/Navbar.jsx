@@ -11,7 +11,7 @@ const linkClasses = ({ isActive }) =>
 const Navbar = () => {
   return (
     <header className="h-14 bg-white border-b flex items-center justify-between px-6">
-      <h2 className="text-lg font-semibold text-gray-800">HRMS Dashboard</h2>
+      <h2 className="text-lg font-semibold text-gray-800">Admin Dashboard</h2>
       <div className="flex items-center gap-3 text-sm">
         <NavLink to="/dashboard/notifications" className={linkClasses}>
           <Bell size={16} />

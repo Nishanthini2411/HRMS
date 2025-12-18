@@ -30,12 +30,16 @@ Field.displayName = "Field";
 const Login = () => {
   const navigate = useNavigate();
 
-  const [role, setRole] = useState("hr"); // "hr" | "admin" | "employee"
+  const [role, setRole] = useState("hr"); // "hr" | "admin" | "employee" | "manager"
   const [showPassword, setShowPassword] = useState(false);
 
   // ✅ refs (uncontrolled inputs = typing perfect)
   const hrEmailRef = useRef(null);
   const hrPassRef = useRef(null);
+
+  // ✅ Manager refs
+  const managerEmailRef = useRef(null);
+  const managerPassRef = useRef(null);
 
   const adminUserRef = useRef(null);
   const adminIdRef = useRef(null);
@@ -45,6 +49,7 @@ const Login = () => {
 
   const roleTitle = useMemo(() => {
     if (role === "admin") return "Admin Login";
+    if (role === "manager") return "Manager Login";
     if (role === "employee") return "Employee Login";
     return "HR Login";
   }, [role]);
@@ -53,6 +58,7 @@ const Login = () => {
   useEffect(() => {
     const t = setTimeout(() => {
       if (role === "hr") hrEmailRef.current?.focus();
+      if (role === "manager") managerEmailRef.current?.focus();
       if (role === "admin") adminUserRef.current?.focus();
       if (role === "employee") empIdRef.current?.focus();
     }, 0);
@@ -62,6 +68,10 @@ const Login = () => {
   const clearAllInputs = () => {
     if (hrEmailRef.current) hrEmailRef.current.value = "";
     if (hrPassRef.current) hrPassRef.current.value = "";
+
+    // ✅ manager clear
+    if (managerEmailRef.current) managerEmailRef.current.value = "";
+    if (managerPassRef.current) managerPassRef.current.value = "";
 
     if (adminUserRef.current) adminUserRef.current.value = "";
     if (adminIdRef.current) adminIdRef.current.value = "";
@@ -83,6 +93,9 @@ const Login = () => {
     const hrEmail = hrEmailRef.current?.value?.trim() || "";
     const hrPassword = hrPassRef.current?.value?.trim() || "";
 
+    const managerEmail = managerEmailRef.current?.value?.trim() || "";
+    const managerPassword = managerPassRef.current?.value?.trim() || "";
+
     const adminUsername = adminUserRef.current?.value?.trim() || "";
     const adminId = adminIdRef.current?.value?.trim() || "";
 
@@ -95,6 +108,13 @@ const Login = () => {
       return;
     }
 
+    // ✅ Manager route
+    if (role === "manager") {
+      if (!managerEmail || !managerPassword) return;
+      navigate("/manager-dashboard");
+      return;
+    }
+
     // ✅ Admin -> /dashboard (Dashboard.jsx)
     if (role === "admin") {
       if (!adminUsername || !adminId) return;
@@ -102,9 +122,10 @@ const Login = () => {
       return;
     }
 
+    // ✅ Employee -> Sign In page (fill personal details)
     if (role === "employee") {
       if (!empId || !empPassword) return;
-      navigate("/employee-dashboard");
+      navigate("/employee-signin", { state: { empId } });
       return;
     }
   };
@@ -137,9 +158,10 @@ const Login = () => {
               <h1 className="text-3xl font-extrabold text-gray-900">Login</h1>
               <div className="mt-2 h-1 w-10 rounded bg-purple-700" />
 
-              <div className="mt-6 flex items-center gap-6">
+              <div className="mt-6 flex items-center gap-6 flex-wrap">
                 <RoleTab value="admin" label="Admin" />
                 <RoleTab value="hr" label="HR" />
+                <RoleTab value="manager" label="Manager" />
                 <RoleTab value="employee" label="Employee" />
               </div>
 
@@ -172,6 +194,42 @@ const Login = () => {
                           onClick={() => {
                             setShowPassword((s) => !s);
                             setTimeout(() => hrPassRef.current?.focus(), 0);
+                          }}
+                          className="shrink-0 text-gray-400 hover:text-gray-600"
+                        >
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      }
+                    />
+                  </>
+                )}
+
+                {/* ✅ MANAGER */}
+                {role === "manager" && (
+                  <>
+                    <Field
+                      ref={managerEmailRef}
+                      icon={Mail}
+                      type="email"
+                      placeholder="Enter manager email"
+                      autoComplete="email"
+                      required
+                    />
+
+                    <Field
+                      ref={managerPassRef}
+                      icon={Lock}
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter manager password"
+                      autoComplete="current-password"
+                      required
+                      right={
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setShowPassword((s) => !s);
+                            setTimeout(() => managerPassRef.current?.focus(), 0);
                           }}
                           className="shrink-0 text-gray-400 hover:text-gray-600"
                         >
@@ -258,8 +316,9 @@ const Login = () => {
                   Redirect:{" "}
                   <span className="font-semibold text-gray-700">
                     {role === "hr" && "/hr-dashboard"}
+                    {role === "manager" && "/manager-dashboard"}
                     {role === "admin" && "/dashboard"}
-                    {role === "employee" && "/employee-dashboard"}
+                    {role === "employee" && "/employee-signin"}
                   </span>
                 </div>
               </form>

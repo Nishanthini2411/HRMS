@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 
 /* ===================== CONFIG ===================== */
-/** ✅ HR notifications should come only from these modules */
 const ALLOWED_SOURCES = [
   "Employees",
   "Attendance",
@@ -28,7 +27,6 @@ const ALLOWED_SOURCES = [
   "Birthday",
 ];
 
-/** ✅ Update your real HR routes (otherwise it may go to login / 404) */
 const SOURCE_ROUTE = {
   Employees: "/hr/employees",
   Attendance: "/hr/attendance",
@@ -38,6 +36,29 @@ const SOURCE_ROUTE = {
   "My Profile": "/hr/profile",
   Birthday: "/hr/birthday",
 };
+
+/** ✅ Row cards */
+const SAGE = "#89AF8E";
+
+/** ✅ Header big card color (new image color) */
+const HEADER = "#005460";
+
+/* ===================== HELPERS ===================== */
+function cn(...a) {
+  return a.filter(Boolean).join(" ");
+}
+
+function hexToRgb(hex) {
+  const h = hex.replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const num = parseInt(full, 16);
+  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+}
+
+function rgba(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 const tone = {
   success: {
@@ -118,11 +139,6 @@ const seed = [
   },
 ];
 
-/* ===================== HELPERS ===================== */
-function cn(...a) {
-  return a.filter(Boolean).join(" ");
-}
-
 function Chip({ active, children, onClick }) {
   return (
     <button
@@ -151,14 +167,16 @@ function EmptyState() {
   );
 }
 
-/* ✅ header stat cards (active should NOT become white) */
+/* ✅ header stat cards */
 function StatCard({ icon: Icon, label, value, active, onClick }) {
   return (
     <button
       onClick={onClick}
       className={cn(
         "w-full text-left rounded-3xl border p-4 shadow-sm transition",
-        active ? "bg-white/15 border-white/25 ring-2 ring-white/20" : "bg-white/10 border-white/15 hover:bg-white/15"
+        active
+          ? "bg-white/15 border-white/25 ring-2 ring-white/20"
+          : "bg-white/10 border-white/15 hover:bg-white/15"
       )}
     >
       <div className="flex items-center gap-3">
@@ -175,17 +193,37 @@ function StatCard({ icon: Icon, label, value, active, onClick }) {
 }
 
 /* ===================== ROW ===================== */
-function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, onGoToSource }) {
+function NotificationRow({
+  n,
+  selected,
+  onToggleSelect,
+  onMarkRead,
+  onDelete,
+  onGoToSource,
+}) {
   const Icon = typeIcon[n.type] ?? Info;
   const t = tone[n.type] ?? tone.info;
 
+  const [hover, setHover] = useState(false);
+
+  // ✅ Card background/border forced to your row color
+  const bg = n.unread ? 0.16 : 0.10;
+  const bgHover = n.unread ? 0.20 : 0.14;
+  const border = n.unread ? 0.40 : 0.26;
+
   return (
     <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       className={cn(
-        "group rounded-3xl border bg-white p-4 shadow-sm transition",
-        selected ? "ring-2 ring-slate-900/10" : "hover:shadow-md",
-        n.unread ? "border-slate-200" : "border-slate-100"
+        "group rounded-3xl border p-4 shadow-sm transition",
+        selected ? "ring-2 ring-slate-900/10" : "hover:shadow-md"
       )}
+      style={{
+        backgroundColor: rgba(SAGE, hover ? bgHover : bg),
+        borderColor: rgba(SAGE, border),
+        boxShadow: selected ? `0 0 0 3px ${rgba(SAGE, 0.28)}` : undefined,
+      }}
     >
       <div className="flex items-start gap-3">
         <button
@@ -199,7 +237,13 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
           {selected ? <Check size={14} className="text-white" /> : null}
         </button>
 
-        <div className={cn("mt-1 h-10 w-10 rounded-2xl border grid place-items-center", t.bg, t.border)}>
+        <div
+          className={cn(
+            "mt-1 h-10 w-10 rounded-2xl border grid place-items-center",
+            t.bg,
+            t.border
+          )}
+        >
           <Icon size={18} className={t.icon} />
         </div>
 
@@ -207,11 +251,22 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={cn("text-[11px] font-semibold rounded-full px-3 py-1 ring-1", t.pill)}>
+                <span
+                  className={cn(
+                    "text-[11px] font-semibold rounded-full px-3 py-1 ring-1",
+                    t.pill
+                  )}
+                >
                   {n.type.toUpperCase()}
                 </span>
 
-                <span className="text-[11px] text-slate-500 rounded-full border px-2.5 py-1">
+                <span
+                  className="text-[11px] text-slate-700 rounded-full border px-2.5 py-1"
+                  style={{
+                    borderColor: rgba(SAGE, 0.35),
+                    backgroundColor: rgba("#ffffff", 0.6),
+                  }}
+                >
                   {n.source}
                 </span>
 
@@ -221,14 +276,14 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
                     Unread
                   </span>
                 ) : (
-                  <span className="text-[11px] text-slate-500">Read</span>
+                  <span className="text-[11px] text-slate-600">Read</span>
                 )}
               </div>
 
               <p className="mt-2 text-sm font-bold text-slate-900">{n.title}</p>
-              <p className="mt-1 text-sm text-slate-600">{n.detail}</p>
+              <p className="mt-1 text-sm text-slate-700">{n.detail}</p>
 
-              <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+              <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-600">
                 <ShieldCheck size={14} />
                 HR Notifications
                 <span className="mx-1 text-slate-300">•</span>
@@ -243,7 +298,11 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
               <div className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition flex items-center gap-2">
                 <button
                   onClick={onGoToSource}
-                  className="text-[11px] font-semibold rounded-full border px-3 py-1 hover:bg-slate-50"
+                  className="text-[11px] font-semibold rounded-full border px-3 py-1"
+                  style={{
+                    borderColor: rgba(SAGE, 0.35),
+                    backgroundColor: rgba("#ffffff", 0.65),
+                  }}
                   title={`Go to ${n.source}`}
                 >
                   Go to {n.source}
@@ -252,7 +311,11 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
                 {n.unread ? (
                   <button
                     onClick={onMarkRead}
-                    className="text-[11px] font-semibold rounded-full border px-3 py-1 hover:bg-slate-50 inline-flex items-center gap-1"
+                    className="text-[11px] font-semibold rounded-full border px-3 py-1 inline-flex items-center gap-1"
+                    style={{
+                      borderColor: rgba(SAGE, 0.35),
+                      backgroundColor: rgba("#ffffff", 0.65),
+                    }}
                     title="Mark as read"
                   >
                     <MailOpen size={12} />
@@ -262,21 +325,20 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
 
                 <button
                   onClick={onDelete}
-                  className="text-[11px] font-semibold rounded-full border px-3 py-1 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700"
+                  className="text-[11px] font-semibold rounded-full border px-3 py-1"
+                  style={{ backgroundColor: rgba("#ffffff", 0.65) }}
                   title="Delete"
                 >
                   Delete
                 </button>
               </div>
 
-              <span className="text-[11px] text-slate-500 flex items-center gap-1">
+              <span className="text-[11px] text-slate-600 flex items-center gap-1">
                 <Clock3 size={12} />
                 {n.time}
               </span>
             </div>
           </div>
-
-          {/* ✅ No "view details" section for HR (clean list) */}
         </div>
       </div>
     </div>
@@ -287,13 +349,16 @@ function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, on
 export default function HrNotifications() {
   const navigate = useNavigate();
 
-  const initial = useMemo(() => seed.filter((x) => ALLOWED_SOURCES.includes(x.source)), []);
+  const initial = useMemo(
+    () => seed.filter((x) => ALLOWED_SOURCES.includes(x.source)),
+    []
+  );
   const [items, setItems] = useState(initial);
 
   const [q, setQ] = useState("");
-  const [type, setType] = useState("All"); // All | success | warning | info
-  const [source, setSource] = useState("All"); // All | module name
-  const [status, setStatus] = useState("All"); // All | Unread | Read
+  const [type, setType] = useState("All");
+  const [source, setSource] = useState("All");
+  const [status, setStatus] = useState("All");
   const [selected, setSelected] = useState(() => new Set());
 
   const filtered = useMemo(() => {
@@ -305,7 +370,11 @@ export default function HrNotifications() {
         const sourceOk = source === "All" ? true : n.source === source;
 
         const statusOk =
-          status === "All" ? true : status === "Unread" ? n.unread === true : n.unread === false;
+          status === "All"
+            ? true
+            : status === "Unread"
+            ? n.unread === true
+            : n.unread === false;
 
         const text = `${n.title} ${n.detail} ${n.source} ${n.time}`.toLowerCase();
         const qOk = !query ? true : text.includes(query);
@@ -336,12 +405,13 @@ export default function HrNotifications() {
   };
 
   const clearSelection = () => setSelected(new Set());
-
   const selectAllFiltered = () => setSelected(() => new Set(filtered.map((x) => x.id)));
 
   const markRead = (ids) => {
     if (!ids?.length) return;
-    setItems((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, unread: false } : x)));
+    setItems((prev) =>
+      prev.map((x) => (ids.includes(x.id) ? { ...x, unread: false } : x))
+    );
     setSelected((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => next.delete(id));
@@ -366,26 +436,47 @@ export default function HrNotifications() {
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
-      <div className="rounded-3xl border bg-gradient-to-b from-slate-900 to-slate-800 text-white p-6 shadow-sm">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      {/* ✅ HEADER (changed to new image color) */}
+      <div
+        className="rounded-3xl border text-white p-6 shadow-sm relative overflow-hidden"
+        style={{
+          backgroundColor: HEADER,
+          borderColor: rgba(HEADER, 0.45),
+        }}
+      >
+        {/* subtle glow */}
+        <div
+          className="absolute -top-16 -left-16 h-64 w-64 rounded-full blur-2xl"
+          style={{ backgroundColor: rgba("#ffffff", 0.10) }}
+        />
+        <div
+          className="absolute -bottom-24 -right-24 h-72 w-72 rounded-full blur-2xl"
+          style={{ backgroundColor: rgba("#ffffff", 0.10) }}
+        />
+
+        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-wider text-white/70">HR Workspace</p>
+            <p className="text-xs uppercase tracking-wider text-white/80">HR Workspace</p>
             <h1 className="text-2xl font-bold mt-1">Notifications</h1>
-            <p className="text-sm text-white/70 mt-1">
+            <p className="text-sm text-white/80 mt-1">
               HR feed from: Employees, Attendance, LeaveManagement, Payroll, Documents, My Profile, Birthday.
             </p>
           </div>
 
-          {/* optional header pill */}
           <div className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-1 text-xs font-semibold">
             HR-facing feed <ChevronDown size={14} className="opacity-80" />
           </div>
         </div>
 
         {/* CLICKABLE CARDS */}
-        <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <StatCard icon={Bell} label="Total" value={counts.total} active={status === "All"} onClick={() => setStatus("All")} />
+        <div className="relative mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <StatCard
+            icon={Bell}
+            label="Total"
+            value={counts.total}
+            active={status === "All"}
+            onClick={() => setStatus("All")}
+          />
           <StatCard
             icon={AlertTriangle}
             label="Unread"
@@ -408,7 +499,10 @@ export default function HrNotifications() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="relative flex-1 min-w-[240px]">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -464,7 +558,9 @@ export default function HrNotifications() {
             >
               Clear
             </button>
-            {selectedCount > 0 ? <span className="text-xs text-slate-500">{selectedCount} selected</span> : null}
+            {selectedCount > 0 ? (
+              <span className="text-xs text-slate-500">{selectedCount} selected</span>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -473,7 +569,9 @@ export default function HrNotifications() {
               onClick={() => markRead([...selected])}
               className={cn(
                 "text-xs font-semibold rounded-full border px-3 py-1.5",
-                selectedCount === 0 ? "text-slate-400 bg-slate-50 cursor-not-allowed" : "hover:bg-slate-50"
+                selectedCount === 0
+                  ? "text-slate-400 bg-slate-50 cursor-not-allowed"
+                  : "hover:bg-slate-50"
               )}
             >
               Mark read

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+// ✅ File: src/pages/hr/HrHome.jsx
+import { useMemo, useState, useEffect } from "react";
 import {
   Search,
   Users,
@@ -12,19 +13,23 @@ import {
   MapPin,
   CalendarDays,
   Building2,
-  Briefcase,
   BadgeCheck,
   Ban,
   Sparkles,
   Filter,
-  Star,
   Hash,
   ExternalLink,
   IdCard,
-  Dot,
+  Bell,
+  ClipboardList,
+  Clock3,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  CalendarCheck,
 } from "lucide-react";
 
-// ---------------- DEMO DATA ----------------
+/* ---------------- DEMO DATA ---------------- */
 const employeesSeed = [
   {
     id: "EMP-001",
@@ -87,7 +92,7 @@ const adminsSeed = [
   },
 ];
 
-// ---------------- HELPERS ----------------
+/* ---------------- HELPERS ---------------- */
 function initials(name = "") {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const a = parts[0]?.[0] || "";
@@ -96,10 +101,6 @@ function initials(name = "") {
 }
 function safeLower(x) {
   return (x || "").toString().toLowerCase();
-}
-function percent(part, total) {
-  if (!total) return 0;
-  return Math.round((part / total) * 100);
 }
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -174,45 +175,7 @@ const SegButton = ({ active, onClick, icon: Icon, label }) => (
   </button>
 );
 
-/** clickable stat card */
-const StatCard = ({
-  title,
-  value,
-  sub,
-  icon: Icon,
-  accent = "from-fuchsia-500 to-amber-500",
-  onClick,
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className="text-left w-full relative overflow-hidden rounded-2xl border bg-white shadow-sm transition hover:shadow-md hover:-translate-y-[1px] active:translate-y-0"
-  >
-    <div className={`absolute inset-0 bg-gradient-to-br ${accent} opacity-[0.08]`} />
-    <div className="relative p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-            {title}
-          </div>
-          <div className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900">
-            {value}
-          </div>
-          {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
-          <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-            Click to view
-          </div>
-        </div>
-        <div className="p-2 rounded-xl bg-white/70 border border-slate-200 shadow-sm">
-          <Icon size={16} className="text-slate-800" />
-        </div>
-      </div>
-    </div>
-  </button>
-);
-
-// ---------------- MODAL (SMALL + ATTRACTIVE) ----------------
+/* ---------------- SMALL MODAL ---------------- */
 function SmallModal({ open, title, subtitle, children, accent = "indigo", onClose }) {
   if (!open) return null;
 
@@ -227,7 +190,7 @@ function SmallModal({ open, title, subtitle, children, accent = "indigo", onClos
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border bg-white shadow-2xl">
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border bg-white shadow-2xl">
         <div className={`absolute inset-0 bg-gradient-to-br ${bg}`} />
         <div className="relative">
           <div className="px-5 py-4 border-b bg-white/65 backdrop-blur">
@@ -267,60 +230,120 @@ function SmallModal({ open, title, subtitle, children, accent = "indigo", onClos
   );
 }
 
-function MiniUserCard({ u, onOpen }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(u)}
-      className="w-full text-left rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
-    >
-      <div className="flex items-center gap-3">
-        <div className="relative w-11 h-11 rounded-2xl border bg-white overflow-hidden shadow-sm">
-          <div
-            className={`absolute inset-0 ${
-              u.type === "employee"
-                ? "bg-gradient-to-br from-emerald-500/25 to-cyan-500/25"
-                : "bg-gradient-to-br from-violet-500/25 to-indigo-500/25"
-            }`}
-          />
-          <div className="relative h-full w-full flex items-center justify-center">
-            <span className="text-xs font-extrabold text-slate-800">{initials(u.name)}</span>
-          </div>
-          <span
-            className={`absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${dotClass(
-              u.status
-            )}`}
-          />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <div className="font-semibold text-slate-900 truncate">{u.name}</div>
-            <span className={statusPill(u.status)}>
-              <span className={`w-2 h-2 rounded-full ${dotClass(u.status)}`} />
-              {u.status}
-            </span>
-          </div>
-
-          <div className="mt-1 text-xs text-slate-500 truncate">{u.id}</div>
-          <div className="mt-1 text-xs text-slate-600 truncate">
-            {u.type === "employee" ? `${u.department} • ${u.designation}` : u.role}
-          </div>
-        </div>
-      </div>
-    </button>
-  );
+/* ---------------- DEMO: Leave / Attendance / Notifications ---------------- */
+function makeDemoLeave(userId) {
+  const isEmp = userId.startsWith("EMP");
+  return [
+    {
+      id: `${isEmp ? "LR" : "AR"}-${userId}-01`,
+      type: isEmp ? "Casual Leave" : "Permission",
+      from: "2025-12-14",
+      to: "2025-12-15",
+      days: 2,
+      status: "Pending",
+      appliedAt: "2025-12-12",
+      reason: isEmp ? "Family function" : "Admin onsite visit",
+    },
+    {
+      id: `${isEmp ? "LR" : "AR"}-${userId}-02`,
+      type: isEmp ? "Sick Leave" : "Work From Home",
+      from: "2025-12-03",
+      to: "2025-12-03",
+      days: 1,
+      status: "Approved",
+      appliedAt: "2025-12-02",
+      reason: isEmp ? "Fever" : "Server maintenance follow-up",
+    },
+  ];
 }
 
+function makeDemoAttendance(userId) {
+  const base = userId.startsWith("EMP") ? 18 : 20;
+  const present = userId.endsWith("3") ? base - 7 : base - 2;
+  const absent = base - present;
+  return {
+    month: "December 2025",
+    workingDays: base,
+    presentDays: present,
+    absentDays: absent,
+    lateMarks: userId.endsWith("2") ? 2 : 1,
+    logs: [
+      { date: "2025-12-16", in: "09:12", out: "18:05", hours: "8h 53m", status: "Present" },
+      { date: "2025-12-15", in: "09:05", out: "18:02", hours: "8h 57m", status: "Present" },
+      { date: "2025-12-14", in: "-", out: "-", hours: "-", status: userId.endsWith("3") ? "Absent" : "Weekend" },
+    ],
+  };
+}
+
+function makeDemoNotifs(userId) {
+  const tone = [
+    { type: "success", icon: CheckCircle2, label: "Success" },
+    { type: "warning", icon: AlertTriangle, label: "Warning" },
+    { type: "info", icon: Info, label: "Info" },
+  ];
+  const pick = (i) => tone[i % tone.length];
+  return [
+    {
+      id: `NT-${userId}-01`,
+      at: "2025-12-17 10:30",
+      title: "Policy update",
+      message: "Leave policy updated. Please review the changes.",
+      ...pick(2),
+      read: false,
+    },
+    {
+      id: `NT-${userId}-02`,
+      at: "2025-12-15 09:10",
+      title: "Attendance reminder",
+      message: "Don’t forget to check-in on time.",
+      ...pick(1),
+      read: true,
+    },
+    {
+      id: `NT-${userId}-03`,
+      at: "2025-12-12 16:40",
+      title: "Request status",
+      message: "Your latest request has been processed.",
+      ...pick(0),
+      read: true,
+    },
+  ];
+}
+
+/* ---------------- SMALL UI: Modal Tabs ---------------- */
+const ModalTabBtn = ({ active, onClick, icon: Icon, label }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm font-semibold border transition ${
+      active
+        ? "bg-slate-900 text-white border-slate-900 shadow"
+        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+    }`}
+  >
+    {Icon ? <Icon size={16} /> : null}
+    {label}
+  </button>
+);
+
+const tonePill = (t) => {
+  if (t === "Approved") return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (t === "Rejected") return "bg-rose-50 text-rose-700 border-rose-200";
+  if (t === "Pending") return "bg-amber-50 text-amber-800 border-amber-200";
+  return "bg-slate-50 text-slate-700 border-slate-200";
+};
+
+/* ---------------- PAGE ---------------- */
 export default function HrHome() {
-  const [tab, setTab] = useState("all"); // all | employees | admins
-  const [statusFilter, setStatusFilter] = useState("all"); // all | Active | Inactive
+  // ✅ tabs: all | employees | admins
+  const [tab, setTab] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("name"); // name|id|type|status|joinedOn
-  const [sortDir, setSortDir] = useState("asc"); // asc|desc
+  const [sortDir, setSortDir] = useState("asc");
 
-  const [viewing, setViewing] = useState(null); // profile modal
-  const [statModal, setStatModal] = useState(null); // "employees" | "admins" | "activeRate" | null
+  const [viewing, setViewing] = useState(null);
+  const [modalTab, setModalTab] = useState("personal"); // personal|leave|attendance|notifications
 
   const combined = useMemo(() => {
     const employees = employeesSeed.map((e) => ({ type: "employee", ...e }));
@@ -397,62 +420,31 @@ export default function HrHome() {
     setSortDir((d) => (d === "asc" ? "desc" : "asc"));
   };
 
+  const openProfile = (u) => {
+    setViewing(u);
+    setModalTab("personal");
+  };
   const closeProfile = () => setViewing(null);
-  const closeStatModal = () => setStatModal(null);
-
-  const activeRate = percent(counts.active, counts.total);
-  const progress = clamp(activeRate, 0, 100);
 
   const searchHint = useMemo(() => {
     if (!search.trim()) return "Search by name, id, email, role/department...";
     return `Searching: "${search.trim()}"`;
   }, [search]);
 
-  // --------- STAT MODAL LISTS ----------
-  const employeesList = useMemo(
-    () => combined.filter((x) => x.type === "employee"),
-    [combined]
+  // Demo linked data for current viewing user
+  const leaveData = useMemo(() => (viewing ? makeDemoLeave(viewing.id) : []), [viewing]);
+  const attendanceData = useMemo(
+    () => (viewing ? makeDemoAttendance(viewing.id) : null),
+    [viewing]
   );
-  const adminsList = useMemo(
-    () => combined.filter((x) => x.type === "admin"),
-    [combined]
-  );
-  const activeList = useMemo(
-    () => combined.filter((x) => x.status === "Active"),
-    [combined]
-  );
-  const inactiveList = useMemo(
-    () => combined.filter((x) => x.status === "Inactive"),
-    [combined]
-  );
+  const notifData = useMemo(() => (viewing ? makeDemoNotifs(viewing.id) : []), [viewing]);
 
-  const statModalConfig = useMemo(() => {
-    if (!statModal) return null;
-
-    if (statModal === "employees") {
-      return {
-        accent: "emerald",
-        title: "Employees",
-        subtitle: `Total: ${counts.emp} • Click any card to view profile`,
-        list: employeesList,
-      };
-    }
-    if (statModal === "admins") {
-      return {
-        accent: "violet",
-        title: "Admins",
-        subtitle: `Total: ${counts.adm} • Click any card to view profile`,
-        list: adminsList,
-      };
-    }
-    // active rate
-    return {
-      accent: "amber",
-      title: "Active Rate Details",
-      subtitle: `Active ${counts.active} • Inactive ${counts.inactive} • Total ${counts.total}`,
-      list: null,
-    };
-  }, [statModal, counts, employeesList, adminsList]);
+  // Keep body scroll nice when modal open
+  useEffect(() => {
+    if (viewing) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => (document.body.style.overflow = "");
+  }, [viewing]);
 
   return (
     <section className="space-y-6">
@@ -467,17 +459,9 @@ export default function HrHome() {
         <div className="relative p-5 sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              {/* <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-white/70 text-slate-700 text-xs font-semibold">
-                <Sparkles size={14} className="text-indigo-600" />
-                HR Workspace • People Directory
-              </div> */}
-
-              <h1 className="mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-               HR Dashboard
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+                HR Dashboard
               </h1>
-              {/* <p className="mt-1 text-sm text-slate-600 max-w-2xl">
-                Click Stats to view details • Click table row to open small profile modal.
-              </p> */}
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-white/70 text-xs font-semibold text-slate-700">
@@ -550,70 +534,26 @@ export default function HrHome() {
         </div>
       </div>
 
-      {/* STATS (CLICKABLE) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <StatCard
-          title="Employees"
-          value={counts.emp}
-          sub="Click to see employee list"
-          icon={Users}
-          accent="from-emerald-500 to-cyan-500"
-          onClick={() => setStatModal("employees")}
-        />
-        <StatCard
-          title="Admins"
-          value={counts.adm}
-          sub="Click to see admin list"
-          icon={Shield}
-          accent="from-violet-500 to-indigo-500"
-          onClick={() => setStatModal("admins")}
-        />
-        <button
-          type="button"
-          onClick={() => setStatModal("activeRate")}
-          className="text-left w-full relative overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:shadow-md hover:-translate-y-[1px] active:translate-y-0"
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-amber-500 to-rose-500 opacity-[0.08]" />
-          <div className="relative p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs font-semibold text-slate-500">Active Rate</div>
-                <div className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900">
-                  {progress}%
-                </div>
-                <div className="mt-2 text-sm text-slate-600">
-                  Active {counts.active} • Inactive {counts.inactive}
-                </div>
-                <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-slate-500">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                  Click to view
-                </div>
-              </div>
-              <div className="p-2.5 rounded-2xl bg-white/70 border border-slate-200 shadow-sm">
-                <Star size={18} className="text-slate-800" />
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-emerald-500 to-amber-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <div className="mt-2 text-xs text-slate-500">
-                Click to see Active/Inactive list.
-              </div>
-            </div>
-          </div>
-        </button>
-      </div>
-
       {/* TABS */}
       <div className="flex flex-wrap items-center gap-2">
-        <SegButton active={tab === "all"} onClick={() => setTab("all")} icon={Sparkles} label="All Users" />
-        <SegButton active={tab === "employees"} onClick={() => setTab("employees")} icon={Users} label="Employees" />
-        <SegButton active={tab === "admins"} onClick={() => setTab("admins")} icon={Shield} label="Admins" />
+        <SegButton
+          active={tab === "all"}
+          onClick={() => setTab("all")}
+          icon={Sparkles}
+          label="All Users"
+        />
+        <SegButton
+          active={tab === "admins"}
+          onClick={() => setTab("admins")}
+          icon={Shield}
+          label="Admins"
+        />
+        <SegButton
+          active={tab === "employees"}
+          onClick={() => setTab("employees")}
+          icon={Users}
+          label="Employees"
+        />
       </div>
 
       {/* TABLE */}
@@ -622,12 +562,13 @@ export default function HrHome() {
           <div>
             <div className="text-sm font-extrabold text-slate-900">User Directory</div>
             <div className="text-xs text-slate-500 mt-0.5">
-              Click any row to open small profile modal
+              Click any row → Personal • Leave • Attendance • Notifications
             </div>
           </div>
 
           <div className="text-xs text-slate-500">
-            Showing <span className="font-semibold text-slate-700">{filtered.length}</span> results
+            Showing <span className="font-semibold text-slate-700">{filtered.length}</span>{" "}
+            results
           </div>
         </div>
 
@@ -692,7 +633,7 @@ export default function HrHome() {
                   <tr
                     key={`${u.type}-${u.id}`}
                     className="hover:bg-slate-50/70 cursor-pointer transition"
-                    onClick={() => setViewing(u)}
+                    onClick={() => openProfile(u)}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -793,109 +734,21 @@ export default function HrHome() {
           </div>
           <div className="inline-flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-slate-300" />
-            Small modal opens on click
+            Modal opens on row click
           </div>
         </div>
       </div>
 
-      {/* STAT MODAL */}
-      <SmallModal
-        open={!!statModal}
-        accent={statModalConfig?.accent || "indigo"}
-        title={statModalConfig?.title || ""}
-        subtitle={statModalConfig?.subtitle || ""}
-        onClose={closeStatModal}
-      >
-        {statModal === "activeRate" ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border bg-white p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-extrabold text-slate-900">Rate</div>
-                <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
-                  <Dot className="text-slate-400" />
-                  Total {counts.total}
-                </span>
-              </div>
-
-              <div className="mt-3 h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-amber-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Active</div>
-                  <div className="mt-1 text-xl font-extrabold text-slate-900">{counts.active}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Inactive</div>
-                  <div className="mt-1 text-xl font-extrabold text-slate-900">{counts.inactive}</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <div className="text-xs font-semibold text-slate-600 mb-2">Active Users</div>
-                <div className="space-y-2">
-                  {activeList.map((u) => (
-                    <MiniUserCard
-                      key={`${u.type}-${u.id}`}
-                      u={u}
-                      onOpen={(user) => {
-                        closeStatModal();
-                        setViewing(user);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold text-slate-600 mb-2 mt-3">Inactive Users</div>
-                <div className="space-y-2">
-                  {inactiveList.map((u) => (
-                    <MiniUserCard
-                      key={`${u.type}-${u.id}`}
-                      u={u}
-                      onOpen={(user) => {
-                        closeStatModal();
-                        setViewing(user);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {statModalConfig?.list?.length ? (
-              statModalConfig.list.map((u) => (
-                <MiniUserCard
-                  key={`${u.type}-${u.id}`}
-                  u={u}
-                  onOpen={(user) => {
-                    closeStatModal();
-                    setViewing(user);
-                  }}
-                />
-              ))
-            ) : (
-              <div className="text-sm text-slate-500">No users.</div>
-            )}
-          </div>
-        )}
-      </SmallModal>
-
-      {/* PROFILE MODAL (SMALLER + CLEAN) */}
+      {/* PROFILE MODAL: Personal + Leave + Attendance + Notifications */}
       <SmallModal
         open={!!viewing}
         accent={viewing?.type === "employee" ? "emerald" : "violet"}
         title={viewing?.name || ""}
-        subtitle={viewing ? `${viewing.id} • ${viewing.type === "employee" ? "Employee" : "Admin"}` : ""}
+        subtitle={
+          viewing
+            ? `${viewing.id} • ${viewing.type === "employee" ? "Employee" : "Admin"}`
+            : ""
+        }
         onClose={closeProfile}
       >
         {viewing ? (
@@ -924,112 +777,373 @@ export default function HrHome() {
               ) : null}
             </div>
 
-            {/* identity row */}
-            <div className="rounded-2xl border bg-white p-4">
-              <div className="flex items-center gap-3">
-                <div className="relative w-12 h-12 rounded-2xl border bg-white overflow-hidden shadow-sm">
-                  <div
-                    className={`absolute inset-0 ${
-                      viewing.type === "employee"
-                        ? "bg-gradient-to-br from-emerald-500/25 to-indigo-500/25"
-                        : "bg-gradient-to-br from-violet-500/25 to-indigo-500/25"
-                    }`}
-                  />
-                  <div className="relative h-full w-full flex items-center justify-center">
-                    <span className="text-sm font-extrabold text-slate-900">
-                      {initials(viewing.name)}
+            {/* modal tabs */}
+            <div className="flex flex-wrap items-center gap-2">
+              <ModalTabBtn
+                active={modalTab === "personal"}
+                onClick={() => setModalTab("personal")}
+                icon={IdCard}
+                label="Personal"
+              />
+              <ModalTabBtn
+                active={modalTab === "leave"}
+                onClick={() => setModalTab("leave")}
+                icon={ClipboardList}
+                label="Leave"
+              />
+              <ModalTabBtn
+                active={modalTab === "attendance"}
+                onClick={() => setModalTab("attendance")}
+                icon={CalendarCheck}
+                label="Attendance"
+              />
+              <ModalTabBtn
+                active={modalTab === "notifications"}
+                onClick={() => setModalTab("notifications")}
+                icon={Bell}
+                label="Notifications"
+              />
+            </div>
+
+            {/* CONTENT */}
+            {modalTab === "personal" ? (
+              <div className="space-y-4">
+                {/* identity row */}
+                <div className="rounded-2xl border bg-white p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-12 h-12 rounded-2xl border bg-white overflow-hidden shadow-sm">
+                      <div
+                        className={`absolute inset-0 ${
+                          viewing.type === "employee"
+                            ? "bg-gradient-to-br from-emerald-500/25 to-indigo-500/25"
+                            : "bg-gradient-to-br from-violet-500/25 to-indigo-500/25"
+                        }`}
+                      />
+                      <div className="relative h-full w-full flex items-center justify-center">
+                        <span className="text-sm font-extrabold text-slate-900">
+                          {initials(viewing.name)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="text-xs text-slate-500">
+                        {viewing.type === "employee" ? "Employee ID" : "Admin ID"}
+                      </div>
+                      <div className="text-sm font-extrabold text-slate-900 inline-flex items-center gap-2">
+                        <IdCard size={16} className="text-slate-500" />
+                        {viewing.id}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* quick actions */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <a
+                    href={`mailto:${viewing.email}`}
+                    className="group rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                        <Mail size={16} /> Email
+                      </div>
+                      <ExternalLink
+                        size={16}
+                        className="text-slate-400 group-hover:text-slate-700"
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 truncate">{viewing.email}</div>
+                  </a>
+
+                  <a
+                    href={`tel:${(viewing.phone || "").replace(/\s+/g, "")}`}
+                    className="group rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                        <Phone size={16} /> Call
+                      </div>
+                      <ExternalLink
+                        size={16}
+                        className="text-slate-400 group-hover:text-slate-700"
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 truncate">{viewing.phone}</div>
+                  </a>
+                </div>
+
+                {/* details */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-2xl border bg-white p-4">
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <MapPin size={16} />
+                      <div className="text-xs text-slate-500">Location</div>
+                    </div>
+                    <div className="mt-1 font-semibold text-slate-900 truncate">
+                      {viewing.location}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-white p-4">
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <CalendarDays size={16} />
+                      <div className="text-xs text-slate-500">Joined On</div>
+                    </div>
+                    <div className="mt-1 font-semibold text-slate-900">
+                      {formatDate(viewing.joinedOn)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-white p-4 sm:col-span-2">
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <Building2 size={16} />
+                      <div className="text-xs text-slate-500">
+                        {viewing.type === "employee" ? "Department / Designation" : "Role"}
+                      </div>
+                    </div>
+
+                    {viewing.type === "employee" ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className={deptBadge(viewing.department)}>{viewing.department}</span>
+                        <span className="text-sm font-semibold text-slate-900">
+                          {viewing.designation}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          • Gender:{" "}
+                          <span className="font-semibold text-slate-700">{viewing.gender}</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm font-semibold text-slate-900">{viewing.role}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {modalTab === "leave" ? (
+              <div className="rounded-2xl border bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                  <div className="text-sm font-extrabold text-slate-900">Leave Requests</div>
+                  <div className="text-xs text-slate-500">{leaveData.length} items</div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-white text-slate-600">
+                      <tr className="border-b">
+                        <th className="text-left px-4 py-3 font-semibold">Request</th>
+                        <th className="text-left px-4 py-3 font-semibold">Duration</th>
+                        <th className="text-left px-4 py-3 font-semibold">Status</th>
+                        <th className="text-right px-4 py-3 font-semibold">Applied</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {leaveData.map((lr) => (
+                        <tr key={lr.id} className="hover:bg-slate-50/60 transition">
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-slate-900">{lr.type}</div>
+                            <div className="text-xs text-slate-500 truncate">{lr.reason}</div>
+                            <div className="mt-1 text-[11px] text-slate-500">{lr.id}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-slate-900 font-semibold">
+                              {lr.from} → {lr.to}
+                            </div>
+                            <div className="text-xs text-slate-500">{lr.days} day(s)</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${tonePill(
+                                lr.status
+                              )}`}
+                            >
+                              <Clock3 size={14} className="opacity-80" />
+                              {lr.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700 font-semibold">
+                            {lr.appliedAt}
+                          </td>
+                        </tr>
+                      ))}
+                      {leaveData.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                            No leave requests.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {modalTab === "attendance" ? (
+              <div className="space-y-3">
+                <div className="rounded-2xl border bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-extrabold text-slate-900">Attendance</div>
+                      <div className="text-xs text-slate-500">{attendanceData?.month}</div>
+                    </div>
+                    <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      <CalendarDays size={14} />
+                      Working Days: {attendanceData?.workingDays ?? 0}
                     </span>
                   </div>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-2xl border bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Present</div>
+                      <div className="mt-1 text-xl font-extrabold text-slate-900">
+                        {attendanceData?.presentDays ?? 0}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Absent</div>
+                      <div className="mt-1 text-xl font-extrabold text-slate-900">
+                        {attendanceData?.absentDays ?? 0}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Late Marks</div>
+                      <div className="mt-1 text-xl font-extrabold text-slate-900">
+                        {attendanceData?.lateMarks ?? 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* progress */}
+                  {attendanceData ? (
+                    <div className="mt-4">
+                      <div className="text-xs font-semibold text-slate-600 mb-2">
+                        Present Rate
+                      </div>
+                      <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-amber-500"
+                          style={{
+                            width: `${clamp(
+                              Math.round(
+                                (attendanceData.presentDays / attendanceData.workingDays) * 100
+                              ),
+                              0,
+                              100
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="min-w-0">
-                  <div className="text-xs text-slate-500">Employee ID</div>
-                  <div className="text-sm font-extrabold text-slate-900 inline-flex items-center gap-2">
-                    <IdCard size={16} className="text-slate-500" />
-                    {viewing.id}
+                {/* logs */}
+                <div className="rounded-2xl border bg-white overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <div className="text-sm font-extrabold text-slate-900">Recent Logs</div>
+                    <div className="text-xs text-slate-500">{attendanceData?.logs?.length ?? 0} rows</div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-slate-600">
+                          <th className="text-left px-4 py-3 font-semibold">Date</th>
+                          <th className="text-left px-4 py-3 font-semibold">In</th>
+                          <th className="text-left px-4 py-3 font-semibold">Out</th>
+                          <th className="text-left px-4 py-3 font-semibold">Hours</th>
+                          <th className="text-right px-4 py-3 font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {attendanceData?.logs?.map((l, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/60 transition">
+                            <td className="px-4 py-3 font-semibold text-slate-900">{l.date}</td>
+                            <td className="px-4 py-3 text-slate-700">{l.in}</td>
+                            <td className="px-4 py-3 text-slate-700">{l.out}</td>
+                            <td className="px-4 py-3 text-slate-700">{l.hours}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border bg-slate-50 text-slate-700 border-slate-200">
+                                <Clock3 size={14} className="opacity-80" />
+                                {l.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {!attendanceData?.logs?.length ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                              No logs.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : null}
 
-            {/* quick actions */}
-            <div className="grid grid-cols-2 gap-3">
-              <a
-                href={`mailto:${viewing.email}`}
-                className="group rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                    <Mail size={16} /> Email
-                  </div>
-                  <ExternalLink size={16} className="text-slate-400 group-hover:text-slate-700" />
+            {modalTab === "notifications" ? (
+              <div className="rounded-2xl border bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                  <div className="text-sm font-extrabold text-slate-900">Notifications</div>
+                  <div className="text-xs text-slate-500">{notifData.length} items</div>
                 </div>
-                <div className="mt-1 text-xs text-slate-500 truncate">{viewing.email}</div>
-              </a>
 
-              <a
-                href={`tel:${(viewing.phone || "").replace(/\s+/g, "")}`}
-                className="group rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                    <Phone size={16} /> Call
-                  </div>
-                  <ExternalLink size={16} className="text-slate-400 group-hover:text-slate-700" />
-                </div>
-                <div className="mt-1 text-xs text-slate-500 truncate">{viewing.phone}</div>
-              </a>
-            </div>
+                <div className="p-4 space-y-3">
+                  {notifData.map((n) => {
+                    const Icon = n.icon || Bell;
+                    const toneCls =
+                      n.type === "success"
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                        : n.type === "warning"
+                        ? "bg-amber-50 border-amber-200 text-amber-800"
+                        : "bg-sky-50 border-sky-200 text-sky-800";
 
-            {/* details */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="rounded-2xl border bg-white p-4">
-                <div className="flex items-center gap-2 text-slate-700">
-                  <MapPin size={16} />
-                  <div className="text-xs text-slate-500">Location</div>
+                    return (
+                      <div
+                        key={n.id}
+                        className={`rounded-2xl border p-3 flex gap-3 ${toneCls}`}
+                      >
+                        <div className="shrink-0 w-10 h-10 rounded-2xl border bg-white/70 flex items-center justify-center">
+                          <Icon size={18} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-extrabold truncate">{n.title}</div>
+                              <div className="text-sm opacity-90 mt-0.5">{n.message}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-[11px] opacity-80">{n.at}</div>
+                              <div
+                                className={`mt-1 inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                                  n.read
+                                    ? "bg-white/70 border-white/60"
+                                    : "bg-slate-900 text-white border-slate-900"
+                                }`}
+                              >
+                                <span className={`w-2 h-2 rounded-full ${n.read ? "bg-slate-300" : "bg-emerald-400"}`} />
+                                {n.read ? "Read" : "New"}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {notifData.length === 0 ? (
+                    <div className="text-sm text-slate-500 text-center py-6">No notifications.</div>
+                  ) : null}
                 </div>
-                <div className="mt-1 font-semibold text-slate-900 truncate">{viewing.location}</div>
               </div>
-
-              <div className="rounded-2xl border bg-white p-4">
-                <div className="flex items-center gap-2 text-slate-700">
-                  <CalendarDays size={16} />
-                  <div className="text-xs text-slate-500">Joined On</div>
-                </div>
-                <div className="mt-1 font-semibold text-slate-900">{formatDate(viewing.joinedOn)}</div>
-              </div>
-
-              <div className="rounded-2xl border bg-white p-4 sm:col-span-2">
-                <div className="flex items-center gap-2 text-slate-700">
-                  <Building2 size={16} />
-                  <div className="text-xs text-slate-500">
-                    {viewing.type === "employee" ? "Department / Designation" : "Role"}
-                  </div>
-                </div>
-
-                {viewing.type === "employee" ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className={deptBadge(viewing.department)}>{viewing.department}</span>
-                    <span className="text-sm font-semibold text-slate-900">
-                      {viewing.designation}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      • Gender:{" "}
-                      <span className="font-semibold text-slate-700">{viewing.gender}</span>
-                    </span>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-sm font-semibold text-slate-900">{viewing.role}</div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border bg-gradient-to-br from-slate-900/5 via-indigo-600/5 to-emerald-500/5 p-4">
-              <div className="text-sm font-extrabold text-slate-900">Upgrade Idea</div>
-              <div className="mt-1 text-sm text-slate-600">
-                Add mini tabs here: Attendance • Leaves • Documents • Payroll (per user).
-              </div>
-            </div>
+            ) : null}
           </div>
         ) : null}
       </SmallModal>

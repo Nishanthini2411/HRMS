@@ -1,6 +1,6 @@
 // src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
-import Login from "./pages/Login";
+import Login from "./pages/auth/Login.jsx";
 
 /* ================= HR ================= */
 import HrLayout from "./pages/hr/HrLayout";
@@ -17,6 +17,8 @@ import Employees from "./pages/admin/Employees.jsx";
 import AdminAttendance from "./pages/admin/Attendance.jsx";
 import AdminLeave from "./pages/admin/LeaveManagement.jsx";
 import Payroll from "./pages/admin/Payroll.jsx";
+import PayslipManagement from "./pages/admin/PayslipManagement.jsx";
+import AdminPayslipView from "./pages/admin/AdminPayslipView.jsx";
 import AdminNotifications from "./pages/admin/AdminNotifications.jsx";
 import AdminProfile from "./pages/admin/AdminProfile.jsx";
 
@@ -38,9 +40,13 @@ import EmployeeDashboard from "./pages/employee/EmployeeDashboard.jsx";
 import EmployeeAttendance from "./pages/employee/EmployeeAttendance.jsx";
 import EmployeeLeaveManagement from "./pages/employee/EmployeeLeaveManagement.jsx";
 import MyProfile from "./pages/employee/profile/MyProfile.jsx";
+import EmployeePayslips from "./pages/employee/EmployeePayslips.jsx";
+
+/* ✅ NEW: EMPLOYEE SIGN IN (details fill page) */
+import EmployeeSignIn from "./pages/employee/EmployeeSignIn.jsx";
 
 /* EMPLOYEE MENU PAGES */
-import { PayrollPage, SupportPage } from "./pages/employee/EmployeeMenuPages.jsx";
+import { SupportPage } from "./pages/employee/EmployeeMenuPages.jsx";
 
 /* REAL EMPLOYEE PAGES */
 import EmployeeNotifications from "./pages/employee/pages/EmployeeNotifications.jsx";
@@ -54,9 +60,14 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/people" element={<PeopleDirectory />} />
 
+      {/* ✅ NEW ROUTE: Employee login -> Sign In (fill personal details) */}
+      <Route path="/employee-signin" element={<EmployeeSignIn />} />
+
       {/* ================= HR ================= */}
       <Route path="/hr-dashboard" element={<HrLayout />}>
         <Route index element={<HrHome />} />
+        <Route path="payroll" element={<Payroll basePath="/hr-dashboard" />} />
+        <Route path="payslips" element={<PayslipManagement basePath="/hr-dashboard" />} />
         <Route path="leave" element={<LeaveManagement />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="notifications" element={<HrNotifications />} />
@@ -70,7 +81,7 @@ export default function App() {
         <Route path="employees" element={<Employees />} />
         <Route path="attendance" element={<AdminAttendance />} />
         <Route path="leave" element={<AdminLeave />} />
-        <Route path="payroll" element={<Payroll />} />
+        <Route path="payslips" element={<AdminPayslipView />} />
         <Route path="notifications" element={<AdminNotifications />} />
         <Route path="profile" element={<AdminProfile />} />
         <Route path="people" element={<PeopleDirectory />} />
@@ -96,16 +107,9 @@ export default function App() {
         <Route path="profile" element={<MyProfile />} />
         <Route path="attendance" element={<EmployeeAttendance />} />
         <Route path="leave" element={<EmployeeLeaveManagement />} />
-
-        {/* ✅ Payroll UI like image */}
-        <Route path="payroll" element={<PayrollPage />} />
-
-        {/* REAL NOTIFICATIONS */}
+        <Route path="payslips" element={<EmployeePayslips />} />
         <Route path="notifications" element={<EmployeeNotifications />} />
-
-        {/* REAL SETTINGS */}
         <Route path="settings" element={<EmployeeSettings />} />
-
         <Route path="support" element={<SupportPage />} />
         <Route path="people" element={<PeopleDirectory />} />
       </Route>
