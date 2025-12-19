@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, User, IdCard, Eye, EyeOff } from "lucide-react";
+import { MANAGER_SESSION_KEY, managerAccounts } from "../manager/managerData";
 
 const Field = forwardRef(
   ({ icon: Icon, type = "text", placeholder, right, autoComplete, required }, ref) => {
@@ -102,6 +103,14 @@ const Login = () => {
     const empId = empIdRef.current?.value?.trim() || "";
     const empPassword = empPassRef.current?.value?.trim() || "";
 
+    const resolveManagerSession = (email) => {
+      const match = managerAccounts.find((m) => m.email.toLowerCase() === email.toLowerCase());
+      if (match) {
+        return { id: match.id, name: match.name, email: match.email, role: match.role, team: match.team };
+      }
+      return { id: "MGR-VIEW", name: "Manager", email, role: "viewer", team: "—" };
+    };
+
     if (role === "hr") {
       if (!hrEmail || !hrPassword) return;
       navigate("/hr-dashboard");
@@ -111,6 +120,8 @@ const Login = () => {
     // ✅ Manager route
     if (role === "manager") {
       if (!managerEmail || !managerPassword) return;
+      const session = resolveManagerSession(managerEmail);
+      localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(session));
       navigate("/manager-dashboard");
       return;
     }

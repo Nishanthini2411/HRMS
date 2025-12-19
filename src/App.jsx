@@ -34,6 +34,14 @@ import AdminHeadSystemSettings from "./pages/adminHead/AdminHeadSystemSettings.j
 import AdminHeadReports from "./pages/adminHead/AdminHeadReports.jsx";
 import AdminHeadNotifications from "./pages/adminHead/AdminHeadNotifications.jsx";
 
+/* ================= MANAGER ================= */
+import ManagerLayout from "./pages/manager/ManagerLayout.jsx";
+import ManagerDashboard from "./pages/manager/ManagerDashboard.jsx";
+import ManagerApprovals from "./pages/manager/ManagerApprovals.jsx";
+import ManagerTeam from "./pages/manager/ManagerTeam.jsx";
+import ManagerPayroll from "./pages/manager/ManagerPayroll.jsx";
+import ManagerNotifications from "./pages/manager/ManagerNotifications.jsx";
+
 /* ================= EMPLOYEE ================= */
 import EmployeeLayout from "./pages/employee/EmployeeLayout.jsx";
 import EmployeeDashboard from "./pages/employee/EmployeeDashboard.jsx";
@@ -98,6 +106,15 @@ export default function App() {
         <Route path="settings" element={<AdminHeadSystemSettings />} />
         <Route path="reports" element={<AdminHeadReports />} />
         <Route path="notifications" element={<AdminHeadNotifications />} />
+      </Route>
+
+      {/* ================= MANAGER ================= */}
+      <Route path="/manager-dashboard" element={<ManagerLayout />}>
+        <Route index element={<ManagerDashboard />} />
+        <Route path="approvals" element={<ManagerApprovals />} />
+        <Route path="team" element={<ManagerTeam />} />
+        <Route path="payroll" element={<ManagerPayroll />} />
+        <Route path="notifications" element={<ManagerNotifications />} />
       </Route>
 
       {/* ================= EMPLOYEE ================= */}
