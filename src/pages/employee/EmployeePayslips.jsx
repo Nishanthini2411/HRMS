@@ -1,13 +1,8 @@
 import { useMemo, useState } from "react";
 import {
   Banknote,
-  Building2,
   CalendarDays,
   Download,
-  FileText,
-  Hash,
-  IndianRupee,
-  MapPin,
   Printer,
   ShieldCheck,
   User,
@@ -15,16 +10,20 @@ import {
 import { PrimaryButton } from "./shared/ui.jsx";
 
 const money = (n) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 const company = {
-  name: "TechCorp Solutions Pvt. Ltd.",
+  name: "Twite AI Technology",
   address: "Plot 45, Electronic City, Bengaluru, Karnataka - 560100",
 };
 
 const payslipData = {
-  "December 2024": {
-    month: "December 2024",
+  "December 2025": {
+    month: "December 2025",
     employee: {
       name: "Rahul Sharma",
       id: "EMP-2024-0156",
@@ -48,11 +47,17 @@ const payslipData = {
       { label: "Other Deductions", value: 0 },
     ],
     attendance: { working: 22, present: 21, paidLeave: 1, lop: 0 },
-    bank: { name: "HDFC Bank", account: "XXXXXXXX9891", mode: "Bank Transfer", paidOn: "31-Dec-2024" },
-    paidOn: "31-Dec-2024",
+    bank: {
+      name: "HDFC Bank",
+      account: "XXXXXXXX9891",
+      mode: "Bank Transfer",
+      paidOn: "31-Dec-2025",
+    },
+    paidOn: "31-Dec-2025",
   },
-  "November 2024": {
-    month: "November 2024",
+
+  "November 2025": {
+    month: "November 2025",
     employee: {
       name: "Rahul Sharma",
       id: "EMP-2024-0156",
@@ -76,8 +81,13 @@ const payslipData = {
       { label: "Other Deductions", value: 0 },
     ],
     attendance: { working: 22, present: 20, paidLeave: 2, lop: 0 },
-    bank: { name: "HDFC Bank", account: "XXXXXXXX9891", mode: "Bank Transfer", paidOn: "30-Nov-2024" },
-    paidOn: "30-Nov-2024",
+    bank: {
+      name: "HDFC Bank",
+      account: "XXXXXXXX9891",
+      mode: "Bank Transfer",
+      paidOn: "30-Nov-2025",
+    },
+    paidOn: "30-Nov-2025",
   },
 };
 
@@ -85,7 +95,9 @@ const MonthCard = ({ label, selected, onClick, paidOn }) => (
   <button
     onClick={onClick}
     className={`w-full text-left rounded-2xl border px-4 py-3 shadow-sm transition ${
-      selected ? "border-indigo-300 bg-indigo-50" : "border-slate-200 bg-white hover:bg-slate-50"
+      selected
+        ? "border-indigo-300 bg-indigo-50"
+        : "border-slate-200 bg-white hover:bg-slate-50"
     }`}
   >
     <div className="flex items-center justify-between">
@@ -94,7 +106,9 @@ const MonthCard = ({ label, selected, onClick, paidOn }) => (
         <p className="text-xs text-slate-500">Paid on {paidOn}</p>
       </div>
       {selected ? (
-        <span className="text-[11px] font-semibold text-indigo-700">Viewing</span>
+        <span className="text-[11px] font-semibold text-indigo-700">
+          Viewing
+        </span>
       ) : (
         <span className="text-[11px] font-semibold text-slate-500">Open</span>
       )}
@@ -111,7 +125,7 @@ const Pill = ({ label, value }) => (
 
 export default function EmployeePayslips() {
   const months = useMemo(() => Object.keys(payslipData), []);
-  const [selected, setSelected] = useState(months[0] || "December 2024");
+  const [selected, setSelected] = useState(months[0] || "December 2025");
   const data = payslipData[selected] || payslipData[months[0]];
 
   const totals = useMemo(() => {
@@ -130,8 +144,12 @@ export default function EmployeePayslips() {
           <div className="rounded-3xl border bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold text-slate-500">Payslip Months</p>
-                <p className="text-lg font-extrabold text-slate-900">Select a month</p>
+                <p className="text-xs font-semibold text-slate-500">
+                  Payslip Months
+                </p>
+                <p className="text-lg font-extrabold text-slate-900">
+                  Select a month
+                </p>
               </div>
               <Banknote size={18} className="text-slate-500" />
             </div>
@@ -151,13 +169,25 @@ export default function EmployeePayslips() {
 
         <div className="xl:col-span-2">
           <div className="overflow-hidden rounded-3xl border bg-white shadow-sm">
+            {/* HEADER with LOGO */}
             <div className="bg-indigo-700 px-6 py-4 text-white flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xl font-extrabold">{company.name}</p>
-                <p className="text-sm text-white/80">{company.address}</p>
+              <div className="flex items-center gap-3">
+                {/* Put your logo here: public/twite-logo.jpg */}
+                <img
+                  src="/twite-logo.jpg"
+                  alt="Twite AI Technology"
+                  className="h-10 w-10 rounded-xl bg-white/10 object-contain p-1"
+                />
+                <div>
+                  <p className="text-xl font-extrabold">{company.name}</p>
+                  <p className="text-sm text-white/80">{company.address}</p>
+                </div>
               </div>
+
               <div className="text-right">
-                <p className="text-[13px] font-semibold text-white/80">Payslip for</p>
+                <p className="text-[13px] font-semibold text-white/80">
+                  Payslip for
+                </p>
                 <p className="text-lg font-bold">{data?.month}</p>
               </div>
             </div>
@@ -179,12 +209,19 @@ export default function EmployeePayslips() {
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                  <p className="text-sm font-extrabold text-slate-900">Earnings</p>
+                  <p className="text-sm font-extrabold text-slate-900">
+                    Earnings
+                  </p>
                   <div className="mt-2 divide-y text-sm">
                     {(data?.earnings || []).map((item) => (
-                      <div key={item.label} className="flex items-center justify-between py-2">
+                      <div
+                        key={item.label}
+                        className="flex items-center justify-between py-2"
+                      >
                         <span className="text-slate-700">{item.label}</span>
-                        <span className="font-bold text-emerald-700 tabular-nums">{money(item.value)}</span>
+                        <span className="font-bold text-emerald-700 tabular-nums">
+                          {money(item.value)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -195,12 +232,19 @@ export default function EmployeePayslips() {
                 </div>
 
                 <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                  <p className="text-sm font-extrabold text-slate-900">Deductions</p>
+                  <p className="text-sm font-extrabold text-slate-900">
+                    Deductions
+                  </p>
                   <div className="mt-2 divide-y text-sm">
                     {(data?.deductions || []).map((item) => (
-                      <div key={item.label} className="flex items-center justify-between py-2">
+                      <div
+                        key={item.label}
+                        className="flex items-center justify-between py-2"
+                      >
                         <span className="text-slate-700">{item.label}</span>
-                        <span className="font-bold text-rose-700 tabular-nums">- {money(item.value)}</span>
+                        <span className="font-bold text-rose-700 tabular-nums">
+                          - {money(item.value)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -217,29 +261,53 @@ export default function EmployeePayslips() {
                   Attendance Summary
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Pill label="Total Working Days" value={data?.attendance?.working ?? "-"} />
-                  <Pill label="Days Present" value={data?.attendance?.present ?? "-"} />
-                  <Pill label="Paid Leave" value={data?.attendance?.paidLeave ?? "-"} />
-                  <Pill label="Loss of Pay (LOP)" value={data?.attendance?.lop ?? "-"} />
+                  <Pill
+                    label="Total Working Days"
+                    value={data?.attendance?.working ?? "-"}
+                  />
+                  <Pill
+                    label="Days Present"
+                    value={data?.attendance?.present ?? "-"}
+                  />
+                  <Pill
+                    label="Paid Leave"
+                    value={data?.attendance?.paidLeave ?? "-"}
+                  />
+                  <Pill
+                    label="Loss of Pay (LOP)"
+                    value={data?.attendance?.lop ?? "-"}
+                  />
                 </div>
               </div>
 
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-sm font-extrabold text-slate-900">Net Pay Summary</p>
+                <p className="text-sm font-extrabold text-slate-900">
+                  Net Pay Summary
+                </p>
                 <div className="mt-3 space-y-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-700">Total Earnings</span>
-                    <span className="font-bold text-emerald-700">{money(totals.earn)}</span>
+                    <span className="font-bold text-emerald-700">
+                      {money(totals.earn)}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-700">Total Deductions</span>
-                    <span className="font-bold text-rose-700">- {money(totals.ded)}</span>
+                    <span className="font-bold text-rose-700">
+                      - {money(totals.ded)}
+                    </span>
                   </div>
                 </div>
                 <div className="mt-4 rounded-xl border bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Net Pay (Take-Home)</p>
-                  <p className="text-2xl font-extrabold text-emerald-800">{money(totals.net)}</p>
-                  <p className="text-[11px] text-emerald-700">Rupees Sixty Nine Thousand Nine Hundred Only (demo)</p>
+                  <p className="text-xs font-semibold text-emerald-700">
+                    Net Pay (Take-Home)
+                  </p>
+                  <p className="text-2xl font-extrabold text-emerald-800">
+                    {money(totals.net)}
+                  </p>
+                  <p className="text-[11px] text-emerald-700">
+                    Rupees Sixty Nine Thousand Nine Hundred Only (demo)
+                  </p>
                 </div>
               </div>
 
@@ -258,15 +326,23 @@ export default function EmployeePayslips() {
 
               <div className="flex items-center gap-2 rounded-2xl border bg-slate-50 px-4 py-3 text-xs text-slate-600">
                 <ShieldCheck size={14} />
-                This is a system-generated payslip and does not require a signature.
+                This is a system-generated payslip and does not require a
+                signature.
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <PrimaryButton onClick={handleDownload} className="bg-indigo-600 text-white hover:bg-indigo-700">
+                <PrimaryButton
+                  onClick={handleDownload}
+                  className="bg-indigo-600 text-white hover:bg-indigo-700"
+                >
                   <Download size={16} />
                   Download PDF
                 </PrimaryButton>
-                <PrimaryButton onClick={handlePrint} className="bg-white text-slate-900 border border-slate-200 hover:bg-slate-50">
+
+                <PrimaryButton
+                  onClick={handlePrint}
+                  className="bg-white text-slate-900 border border-slate-200 hover:bg-slate-50"
+                >
                   <Printer size={16} />
                   Print
                 </PrimaryButton>

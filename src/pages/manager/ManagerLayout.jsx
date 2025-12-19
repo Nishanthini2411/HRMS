@@ -43,6 +43,12 @@ export default function ManagerLayout() {
   const [session, setSession] = useState(getManagerSession());
 
   useEffect(() => {
+    if (localStorage.getItem("hrmss.signin.completed.manager") !== "true") {
+      navigate("/sign-in", { state: { role: "manager" } });
+    }
+  }, [navigate]);
+
+  useEffect(() => {
     setSession(getManagerSession());
   }, [location.pathname]);
 

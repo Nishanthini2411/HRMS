@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -38,6 +39,12 @@ const tabs = [
 
 export default function EmployeeLayout() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (localStorage.getItem("hrmss.signin.completed.employee") !== "true") {
+      navigate("/sign-in", { state: { role: "employee" } });
+    }
+  }, [navigate]);
 
   const handleLogout = () => {
     navigate("/login");

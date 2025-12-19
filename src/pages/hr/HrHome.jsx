@@ -18,7 +18,6 @@ import {
   Sparkles,
   Filter,
   Hash,
-  ExternalLink,
   IdCard,
   Bell,
   ClipboardList,
@@ -175,31 +174,33 @@ const SegButton = ({ active, onClick, icon: Icon, label }) => (
   </button>
 );
 
-/* ---------------- SMALL MODAL ---------------- */
+/* ---------------- SMALL MODAL (SMALLER + SCROLL) ---------------- */
 function SmallModal({ open, title, subtitle, children, accent = "indigo", onClose }) {
   if (!open) return null;
 
   const accentMap = {
-    indigo: "from-indigo-500/20 via-sky-500/10 to-emerald-500/10",
-    emerald: "from-emerald-500/20 via-cyan-500/10 to-indigo-500/10",
-    violet: "from-violet-500/22 via-indigo-500/10 to-cyan-500/10",
-    amber: "from-amber-500/22 via-rose-500/10 to-indigo-500/10",
+    indigo: "from-indigo-500/18 via-sky-500/10 to-emerald-500/10",
+    emerald: "from-emerald-500/18 via-cyan-500/10 to-indigo-500/10",
+    violet: "from-violet-500/18 via-indigo-500/10 to-cyan-500/10",
+    amber: "from-amber-500/18 via-rose-500/10 to-indigo-500/10",
   };
   const bg = accentMap[accent] || accentMap.indigo;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border bg-white shadow-2xl">
+
+      {/* ✅ smaller width */}
+      <div className="relative w-full max-w-xl overflow-hidden rounded-3xl border bg-white shadow-2xl">
         <div className={`absolute inset-0 bg-gradient-to-br ${bg}`} />
+
         <div className="relative">
-          <div className="px-5 py-4 border-b bg-white/65 backdrop-blur">
+          {/* header */}
+          <div className="px-4 py-3 border-b bg-white/75 backdrop-blur">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-slate-900 truncate">{title}</div>
-                {subtitle ? (
-                  <div className="mt-0.5 text-xs text-slate-600 truncate">{subtitle}</div>
-                ) : null}
+                {subtitle ? <div className="mt-0.5 text-xs text-slate-600 truncate">{subtitle}</div> : null}
               </div>
 
               <button
@@ -213,9 +214,11 @@ function SmallModal({ open, title, subtitle, children, accent = "indigo", onClos
             </div>
           </div>
 
-          <div className="p-5">{children}</div>
+          {/* ✅ content scroll */}
+          <div className="p-4 max-h-[72vh] overflow-y-auto">{children}</div>
 
-          <div className="px-5 py-4 border-t bg-white/65 backdrop-blur flex items-center justify-end">
+          {/* footer */}
+          <div className="px-4 py-3 border-t bg-white/75 backdrop-blur flex items-center justify-end">
             <button
               type="button"
               onClick={onClose}
@@ -277,9 +280,9 @@ function makeDemoAttendance(userId) {
 
 function makeDemoNotifs(userId) {
   const tone = [
-    { type: "success", icon: CheckCircle2, label: "Success" },
-    { type: "warning", icon: AlertTriangle, label: "Warning" },
-    { type: "info", icon: Info, label: "Info" },
+    { type: "success", icon: CheckCircle2 },
+    { type: "warning", icon: AlertTriangle },
+    { type: "info", icon: Info },
   ];
   const pick = (i) => tone[i % tone.length];
   return [
@@ -335,15 +338,14 @@ const tonePill = (t) => {
 
 /* ---------------- PAGE ---------------- */
 export default function HrHome() {
-  // ✅ tabs: all | employees | admins
   const [tab, setTab] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState("name"); // name|id|type|status|joinedOn
+  const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
 
   const [viewing, setViewing] = useState(null);
-  const [modalTab, setModalTab] = useState("personal"); // personal|leave|attendance|notifications
+  const [modalTab, setModalTab] = useState("personal");
 
   const combined = useMemo(() => {
     const employees = employeesSeed.map((e) => ({ type: "employee", ...e }));
@@ -371,8 +373,7 @@ export default function HrHome() {
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((x) => {
-        const roleOrDept =
-          x.type === "employee" ? `${x.department} ${x.designation}` : x.role;
+        const roleOrDept = x.type === "employee" ? `${x.department} ${x.designation}` : x.role;
         return (
           safeLower(x.id).includes(q) ||
           safeLower(x.name).includes(q) ||
@@ -431,15 +432,10 @@ export default function HrHome() {
     return `Searching: "${search.trim()}"`;
   }, [search]);
 
-  // Demo linked data for current viewing user
   const leaveData = useMemo(() => (viewing ? makeDemoLeave(viewing.id) : []), [viewing]);
-  const attendanceData = useMemo(
-    () => (viewing ? makeDemoAttendance(viewing.id) : null),
-    [viewing]
-  );
+  const attendanceData = useMemo(() => (viewing ? makeDemoAttendance(viewing.id) : null), [viewing]);
   const notifData = useMemo(() => (viewing ? makeDemoNotifs(viewing.id) : []), [viewing]);
 
-  // Keep body scroll nice when modal open
   useEffect(() => {
     if (viewing) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
@@ -536,24 +532,9 @@ export default function HrHome() {
 
       {/* TABS */}
       <div className="flex flex-wrap items-center gap-2">
-        <SegButton
-          active={tab === "all"}
-          onClick={() => setTab("all")}
-          icon={Sparkles}
-          label="All Users"
-        />
-        <SegButton
-          active={tab === "admins"}
-          onClick={() => setTab("admins")}
-          icon={Shield}
-          label="Admins"
-        />
-        <SegButton
-          active={tab === "employees"}
-          onClick={() => setTab("employees")}
-          icon={Users}
-          label="Employees"
-        />
+        <SegButton active={tab === "all"} onClick={() => setTab("all")} icon={Sparkles} label="All Users" />
+        <SegButton active={tab === "admins"} onClick={() => setTab("admins")} icon={Shield} label="Admins" />
+        <SegButton active={tab === "employees"} onClick={() => setTab("employees")} icon={Users} label="Employees" />
       </div>
 
       {/* TABLE */}
@@ -561,14 +542,11 @@ export default function HrHome() {
         <div className="px-4 sm:px-6 py-4 border-b flex items-center justify-between">
           <div>
             <div className="text-sm font-extrabold text-slate-900">User Directory</div>
-            <div className="text-xs text-slate-500 mt-0.5">
-              Click any row → Personal • Leave • Attendance • Notifications
-            </div>
+            <div className="text-xs text-slate-500 mt-0.5">Click any row → opens compact modal</div>
           </div>
 
           <div className="text-xs text-slate-500">
-            Showing <span className="font-semibold text-slate-700">{filtered.length}</span>{" "}
-            results
+            Showing <span className="font-semibold text-slate-700">{filtered.length}</span> results
           </div>
         </div>
 
@@ -577,21 +555,13 @@ export default function HrHome() {
             <thead className="bg-slate-50 text-slate-600">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("name")}
-                    className="inline-flex items-center gap-2 hover:text-slate-900"
-                  >
+                  <button type="button" onClick={() => toggleSort("name")} className="inline-flex items-center gap-2 hover:text-slate-900">
                     User <SortIcon active={sortKey === "name"} dir={sortDir} />
                   </button>
                 </th>
 
                 <th className="text-left px-4 py-3 font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("type")}
-                    className="inline-flex items-center gap-2 hover:text-slate-900"
-                  >
+                  <button type="button" onClick={() => toggleSort("type")} className="inline-flex items-center gap-2 hover:text-slate-900">
                     Type <SortIcon active={sortKey === "type"} dir={sortDir} />
                   </button>
                 </th>
@@ -600,21 +570,13 @@ export default function HrHome() {
                 <th className="text-left px-4 py-3 font-semibold">Role / Dept</th>
 
                 <th className="text-left px-4 py-3 font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("status")}
-                    className="inline-flex items-center gap-2 hover:text-slate-900"
-                  >
+                  <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-2 hover:text-slate-900">
                     Status <SortIcon active={sortKey === "status"} dir={sortDir} />
                   </button>
                 </th>
 
                 <th className="text-right px-4 py-3 font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("joinedOn")}
-                    className="inline-flex items-center gap-2 hover:text-slate-900"
-                  >
+                  <button type="button" onClick={() => toggleSort("joinedOn")} className="inline-flex items-center gap-2 hover:text-slate-900">
                     Joined <SortIcon active={sortKey === "joinedOn"} dir={sortDir} />
                   </button>
                 </th>
@@ -646,14 +608,10 @@ export default function HrHome() {
                             }`}
                           />
                           <div className="relative h-full w-full flex items-center justify-center">
-                            <span className="text-xs font-extrabold text-slate-800">
-                              {initials(u.name)}
-                            </span>
+                            <span className="text-xs font-extrabold text-slate-800">{initials(u.name)}</span>
                           </div>
                           <span
-                            className={`absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${dotClass(
-                              u.status
-                            )}`}
+                            className={`absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${dotClass(u.status)}`}
                           />
                         </div>
 
@@ -678,8 +636,13 @@ export default function HrHome() {
                       </span>
                     </td>
 
+                    {/* ✅ IMPORTANT: clicking email/phone should NOT open modal */}
                     <td className="px-4 py-3">
-                      <div className="space-y-1">
+                      <div
+                        className="space-y-1 cursor-text select-text"
+                        onClick={(e) => e.stopPropagation()}
+                        role="presentation"
+                      >
                         <div className="text-slate-800 font-semibold truncate">{u.email}</div>
                         <div className="text-xs text-slate-500 truncate">{u.phone}</div>
                       </div>
@@ -689,9 +652,7 @@ export default function HrHome() {
                       {u.type === "employee" ? (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={deptBadge(u.department)}>{u.department}</span>
-                          <span className="text-xs text-slate-600 font-semibold">
-                            {u.designation}
-                          </span>
+                          <span className="text-xs text-slate-600 font-semibold">{u.designation}</span>
                         </div>
                       ) : (
                         <div className="font-semibold text-slate-800">{u.role}</div>
@@ -717,9 +678,7 @@ export default function HrHome() {
                       </span>
                     </td>
 
-                    <td className="px-4 py-3 text-right text-slate-700 font-semibold">
-                      {formatDate(u.joinedOn)}
-                    </td>
+                    <td className="px-4 py-3 text-right text-slate-700 font-semibold">{formatDate(u.joinedOn)}</td>
                   </tr>
                 ))
               )}
@@ -739,21 +698,17 @@ export default function HrHome() {
         </div>
       </div>
 
-      {/* PROFILE MODAL: Personal + Leave + Attendance + Notifications */}
+      {/* PROFILE MODAL */}
       <SmallModal
         open={!!viewing}
         accent={viewing?.type === "employee" ? "emerald" : "violet"}
         title={viewing?.name || ""}
-        subtitle={
-          viewing
-            ? `${viewing.id} • ${viewing.type === "employee" ? "Employee" : "Admin"}`
-            : ""
-        }
+        subtitle={viewing ? `${viewing.id} • ${viewing.type === "employee" ? "Employee" : "Admin"}` : ""}
         onClose={closeProfile}
       >
         {viewing ? (
           <div className="space-y-4">
-            {/* top chips */}
+            {/* chips */}
             <div className="flex flex-wrap items-center gap-2">
               <span className={typePill(viewing.type)}>
                 {viewing.type === "employee" ? (
@@ -772,46 +727,24 @@ export default function HrHome() {
                 {viewing.status}
               </span>
 
-              {viewing.type === "employee" ? (
-                <span className={deptBadge(viewing.department)}>{viewing.department}</span>
-              ) : null}
+              {viewing.type === "employee" ? <span className={deptBadge(viewing.department)}>{viewing.department}</span> : null}
             </div>
 
-            {/* modal tabs */}
+            {/* tabs */}
             <div className="flex flex-wrap items-center gap-2">
-              <ModalTabBtn
-                active={modalTab === "personal"}
-                onClick={() => setModalTab("personal")}
-                icon={IdCard}
-                label="Personal"
-              />
-              <ModalTabBtn
-                active={modalTab === "leave"}
-                onClick={() => setModalTab("leave")}
-                icon={ClipboardList}
-                label="Leave"
-              />
-              <ModalTabBtn
-                active={modalTab === "attendance"}
-                onClick={() => setModalTab("attendance")}
-                icon={CalendarCheck}
-                label="Attendance"
-              />
-              <ModalTabBtn
-                active={modalTab === "notifications"}
-                onClick={() => setModalTab("notifications")}
-                icon={Bell}
-                label="Notifications"
-              />
+              <ModalTabBtn active={modalTab === "personal"} onClick={() => setModalTab("personal")} icon={IdCard} label="Personal" />
+              <ModalTabBtn active={modalTab === "leave"} onClick={() => setModalTab("leave")} icon={ClipboardList} label="Leave" />
+              <ModalTabBtn active={modalTab === "attendance"} onClick={() => setModalTab("attendance")} icon={CalendarCheck} label="Attendance" />
+              <ModalTabBtn active={modalTab === "notifications"} onClick={() => setModalTab("notifications")} icon={Bell} label="Notifications" />
             </div>
 
-            {/* CONTENT */}
+            {/* PERSONAL */}
             {modalTab === "personal" ? (
-              <div className="space-y-4">
-                {/* identity row */}
+              <div className="space-y-3">
+                {/* compact identity */}
                 <div className="rounded-2xl border bg-white p-4">
                   <div className="flex items-center gap-3">
-                    <div className="relative w-12 h-12 rounded-2xl border bg-white overflow-hidden shadow-sm">
+                    <div className="relative w-11 h-11 rounded-2xl border bg-white overflow-hidden shadow-sm">
                       <div
                         className={`absolute inset-0 ${
                           viewing.type === "employee"
@@ -820,14 +753,12 @@ export default function HrHome() {
                         }`}
                       />
                       <div className="relative h-full w-full flex items-center justify-center">
-                        <span className="text-sm font-extrabold text-slate-900">
-                          {initials(viewing.name)}
-                        </span>
+                        <span className="text-sm font-extrabold text-slate-900">{initials(viewing.name)}</span>
                       </div>
                     </div>
 
                     <div className="min-w-0">
-                      <div className="text-xs text-slate-500">
+                      <div className="text-[11px] text-slate-500">
                         {viewing.type === "employee" ? "Employee ID" : "Admin ID"}
                       </div>
                       <div className="text-sm font-extrabold text-slate-900 inline-flex items-center gap-2">
@@ -838,39 +769,21 @@ export default function HrHome() {
                   </div>
                 </div>
 
-                {/* quick actions */}
+                {/* ✅ Email/Phone cards: NOT clickable (no mailto/tel) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <a
-                    href={`mailto:${viewing.email}`}
-                    className="group rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                        <Mail size={16} /> Email
-                      </div>
-                      <ExternalLink
-                        size={16}
-                        className="text-slate-400 group-hover:text-slate-700"
-                      />
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <Mail size={16} /> Email
                     </div>
-                    <div className="mt-1 text-xs text-slate-500 truncate">{viewing.email}</div>
-                  </a>
+                    <div className="mt-1 text-xs text-slate-500 truncate select-text cursor-text">{viewing.email}</div>
+                  </div>
 
-                  <a
-                    href={`tel:${(viewing.phone || "").replace(/\s+/g, "")}`}
-                    className="group rounded-2xl border bg-white hover:bg-slate-50 transition p-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                        <Phone size={16} /> Call
-                      </div>
-                      <ExternalLink
-                        size={16}
-                        className="text-slate-400 group-hover:text-slate-700"
-                      />
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <Phone size={16} /> Phone
                     </div>
-                    <div className="mt-1 text-xs text-slate-500 truncate">{viewing.phone}</div>
-                  </a>
+                    <div className="mt-1 text-xs text-slate-500 truncate select-text cursor-text">{viewing.phone}</div>
+                  </div>
                 </div>
 
                 {/* details */}
@@ -880,9 +793,7 @@ export default function HrHome() {
                       <MapPin size={16} />
                       <div className="text-xs text-slate-500">Location</div>
                     </div>
-                    <div className="mt-1 font-semibold text-slate-900 truncate">
-                      {viewing.location}
-                    </div>
+                    <div className="mt-1 font-semibold text-slate-900 truncate">{viewing.location}</div>
                   </div>
 
                   <div className="rounded-2xl border bg-white p-4">
@@ -890,9 +801,7 @@ export default function HrHome() {
                       <CalendarDays size={16} />
                       <div className="text-xs text-slate-500">Joined On</div>
                     </div>
-                    <div className="mt-1 font-semibold text-slate-900">
-                      {formatDate(viewing.joinedOn)}
-                    </div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDate(viewing.joinedOn)}</div>
                   </div>
 
                   <div className="rounded-2xl border bg-white p-4 sm:col-span-2">
@@ -906,12 +815,9 @@ export default function HrHome() {
                     {viewing.type === "employee" ? (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <span className={deptBadge(viewing.department)}>{viewing.department}</span>
-                        <span className="text-sm font-semibold text-slate-900">
-                          {viewing.designation}
-                        </span>
+                        <span className="text-sm font-semibold text-slate-900">{viewing.designation}</span>
                         <span className="text-xs text-slate-500">
-                          • Gender:{" "}
-                          <span className="font-semibold text-slate-700">{viewing.gender}</span>
+                          • Gender: <span className="font-semibold text-slate-700">{viewing.gender}</span>
                         </span>
                       </div>
                     ) : (
@@ -922,6 +828,7 @@ export default function HrHome() {
               </div>
             ) : null}
 
+            {/* LEAVE */}
             {modalTab === "leave" ? (
               <div className="rounded-2xl border bg-white overflow-hidden">
                 <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
@@ -954,18 +861,12 @@ export default function HrHome() {
                             <div className="text-xs text-slate-500">{lr.days} day(s)</div>
                           </td>
                           <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${tonePill(
-                                lr.status
-                              )}`}
-                            >
+                            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${tonePill(lr.status)}`}>
                               <Clock3 size={14} className="opacity-80" />
                               {lr.status}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-right text-slate-700 font-semibold">
-                            {lr.appliedAt}
-                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700 font-semibold">{lr.appliedAt}</td>
                         </tr>
                       ))}
                       {leaveData.length === 0 ? (
@@ -981,6 +882,7 @@ export default function HrHome() {
               </div>
             ) : null}
 
+            {/* ATTENDANCE */}
             {modalTab === "attendance" ? (
               <div className="space-y-3">
                 <div className="rounded-2xl border bg-white p-4">
@@ -998,38 +900,27 @@ export default function HrHome() {
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="rounded-2xl border bg-slate-50 p-3">
                       <div className="text-xs text-slate-500">Present</div>
-                      <div className="mt-1 text-xl font-extrabold text-slate-900">
-                        {attendanceData?.presentDays ?? 0}
-                      </div>
+                      <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.presentDays ?? 0}</div>
                     </div>
                     <div className="rounded-2xl border bg-slate-50 p-3">
                       <div className="text-xs text-slate-500">Absent</div>
-                      <div className="mt-1 text-xl font-extrabold text-slate-900">
-                        {attendanceData?.absentDays ?? 0}
-                      </div>
+                      <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.absentDays ?? 0}</div>
                     </div>
                     <div className="rounded-2xl border bg-slate-50 p-3">
                       <div className="text-xs text-slate-500">Late Marks</div>
-                      <div className="mt-1 text-xl font-extrabold text-slate-900">
-                        {attendanceData?.lateMarks ?? 0}
-                      </div>
+                      <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.lateMarks ?? 0}</div>
                     </div>
                   </div>
 
-                  {/* progress */}
                   {attendanceData ? (
                     <div className="mt-4">
-                      <div className="text-xs font-semibold text-slate-600 mb-2">
-                        Present Rate
-                      </div>
+                      <div className="text-xs font-semibold text-slate-600 mb-2">Present Rate</div>
                       <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-amber-500"
                           style={{
                             width: `${clamp(
-                              Math.round(
-                                (attendanceData.presentDays / attendanceData.workingDays) * 100
-                              ),
+                              Math.round((attendanceData.presentDays / attendanceData.workingDays) * 100),
                               0,
                               100
                             )}%`,
@@ -1040,7 +931,6 @@ export default function HrHome() {
                   ) : null}
                 </div>
 
-                {/* logs */}
                 <div className="rounded-2xl border bg-white overflow-hidden">
                   <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
                     <div className="text-sm font-extrabold text-slate-900">Recent Logs</div>
@@ -1087,6 +977,7 @@ export default function HrHome() {
               </div>
             ) : null}
 
+            {/* NOTIFICATIONS */}
             {modalTab === "notifications" ? (
               <div className="rounded-2xl border bg-white overflow-hidden">
                 <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
@@ -1105,10 +996,7 @@ export default function HrHome() {
                         : "bg-sky-50 border-sky-200 text-sky-800";
 
                     return (
-                      <div
-                        key={n.id}
-                        className={`rounded-2xl border p-3 flex gap-3 ${toneCls}`}
-                      >
+                      <div key={n.id} className={`rounded-2xl border p-3 flex gap-3 ${toneCls}`}>
                         <div className="shrink-0 w-10 h-10 rounded-2xl border bg-white/70 flex items-center justify-center">
                           <Icon size={18} />
                         </div>
@@ -1123,9 +1011,7 @@ export default function HrHome() {
                               <div className="text-[11px] opacity-80">{n.at}</div>
                               <div
                                 className={`mt-1 inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-                                  n.read
-                                    ? "bg-white/70 border-white/60"
-                                    : "bg-slate-900 text-white border-slate-900"
+                                  n.read ? "bg-white/70 border-white/60" : "bg-slate-900 text-white border-slate-900"
                                 }`}
                               >
                                 <span className={`w-2 h-2 rounded-full ${n.read ? "bg-slate-300" : "bg-emerald-400"}`} />

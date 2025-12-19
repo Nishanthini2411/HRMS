@@ -1,8 +1,11 @@
 import { useMemo, useRef, useState, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, User, IdCard, Eye, EyeOff } from "lucide-react";
-import { MANAGER_SESSION_KEY, managerAccounts } from "../manager/managerData";
+import { Mail, Lock, User, IdCard, Eye, EyeOff, AlertTriangle } from "lucide-react";
 
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
+import { MANAGER_SESSION_KEY } from "../manager/managerData";
+
+/* ---------------- Field ---------------- */
 const Field = forwardRef(
   ({ icon: Icon, type = "text", placeholder, right, autoComplete, required }, ref) => {
     return (
@@ -25,25 +28,29 @@ const Field = forwardRef(
     );
   }
 );
-
 Field.displayName = "Field";
 
-const Login = () => {
+/* ---------------- Login ---------------- */
+export default function Login() {
   const navigate = useNavigate();
 
   const [role, setRole] = useState("hr"); // "hr" | "admin" | "employee" | "manager"
   const [showPassword, setShowPassword] = useState(false);
 
-  // ✅ refs (uncontrolled inputs = typing perfect)
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  // ✅ refs (uncontrolled inputs)
   const hrEmailRef = useRef(null);
   const hrPassRef = useRef(null);
 
-  // ✅ Manager refs
   const managerEmailRef = useRef(null);
   const managerPassRef = useRef(null);
 
+  // NOTE: we add password for admin too (recommended)
   const adminUserRef = useRef(null);
   const adminIdRef = useRef(null);
+  const adminPassRef = useRef(null);
 
   const empIdRef = useRef(null);
   const empPassRef = useRef(null);
@@ -55,7 +62,6 @@ const Login = () => {
     return "HR Login";
   }, [role]);
 
-  // ✅ focus only when role changes (not on typing)
   useEffect(() => {
     const t = setTimeout(() => {
       if (role === "hr") hrEmailRef.current?.focus();
@@ -67,15 +73,17 @@ const Login = () => {
   }, [role]);
 
   const clearAllInputs = () => {
+    setErr("");
+
     if (hrEmailRef.current) hrEmailRef.current.value = "";
     if (hrPassRef.current) hrPassRef.current.value = "";
 
-    // ✅ manager clear
     if (managerEmailRef.current) managerEmailRef.current.value = "";
     if (managerPassRef.current) managerPassRef.current.value = "";
 
     if (adminUserRef.current) adminUserRef.current.value = "";
     if (adminIdRef.current) adminIdRef.current.value = "";
+    if (adminPassRef.current) adminPassRef.current.value = "";
 
     if (empIdRef.current) empIdRef.current.value = "";
     if (empPassRef.current) empPassRef.current.value = "";
@@ -87,8 +95,45 @@ const Login = () => {
     clearAllInputs();
   };
 
-  const handleSubmit = (e) => {
+  const roleRedirects = {
+    hr: "/hr-dashboard",
+    manager: "/manager-dashboard",
+    admin: "/dashboard",
+    employee: "/employee-dashboard",
+  };
+
+  const goToSignIn = (nextRole, extraState = {}) => {
+    localStorage.setItem("hrmss.lastRole", nextRole);
+    navigate("/sign-in", {
+      state: {
+        role: nextRole,
+        redirectTo: roleRedirects[nextRole],
+        ...extraState,
+      },
+    });
+  };
+
+  /* ---------------- Supabase login payload helpers ---------------- */
+  const rpcVerify = async ({ p_role, p_identifier, p_admin_id = null, p_secret }) => {
+    if (!isSupabaseConfigured) {
+      throw new Error("Supabase env missing. Check VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
+    }
+
+    const { data, error } = await supabase.rpc("verify_login", {
+      p_role,
+      p_identifier,
+      p_admin_id,
+      p_secret,
+    });
+
+    if (error) throw new Error(error.message || "Login failed");
+    if (!data || data.length === 0) throw new Error("Invalid credentials");
+    return data[0]; // session object from RPC
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setErr("");
 
     // read values from refs
     const hrEmail = hrEmailRef.current?.value?.trim() || "";
@@ -99,45 +144,99 @@ const Login = () => {
 
     const adminUsername = adminUserRef.current?.value?.trim() || "";
     const adminId = adminIdRef.current?.value?.trim() || "";
+    const adminPassword = adminPassRef.current?.value?.trim() || ""; // ✅ added
 
     const empId = empIdRef.current?.value?.trim() || "";
     const empPassword = empPassRef.current?.value?.trim() || "";
 
-    const resolveManagerSession = (email) => {
-      const match = managerAccounts.find((m) => m.email.toLowerCase() === email.toLowerCase());
-      if (match) {
-        return { id: match.id, name: match.name, email: match.email, role: match.role, team: match.team };
+    try {
+      setLoading(true);
+
+      // ✅ HR
+      if (role === "hr") {
+        if (!hrEmail || !hrPassword) return;
+
+        const session = await rpcVerify({
+          p_role: "hr",
+          p_identifier: hrEmail,
+          p_secret: hrPassword,
+        });
+
+        localStorage.setItem(
+          "HRMSS_AUTH_SESSION",
+          JSON.stringify({ ...session, loginRole: "hr" })
+        );
+
+        goToSignIn("hr");
+        return;
       }
-      return { id: "MGR-VIEW", name: "Manager", email, role: "viewer", team: "—" };
-    };
 
-    if (role === "hr") {
-      if (!hrEmail || !hrPassword) return;
-      navigate("/hr-dashboard");
-      return;
-    }
+      // ✅ MANAGER
+      if (role === "manager") {
+        if (!managerEmail || !managerPassword) return;
 
-    // ✅ Manager route
-    if (role === "manager") {
-      if (!managerEmail || !managerPassword) return;
-      const session = resolveManagerSession(managerEmail);
-      localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(session));
-      navigate("/manager-dashboard");
-      return;
-    }
+        const session = await rpcVerify({
+          p_role: "manager",
+          p_identifier: managerEmail,
+          p_secret: managerPassword,
+        });
 
-    // ✅ Admin -> /dashboard (Dashboard.jsx)
-    if (role === "admin") {
-      if (!adminUsername || !adminId) return;
-      navigate("/dashboard");
-      return;
-    }
+        // keep your existing manager session key usage
+        localStorage.setItem(
+          MANAGER_SESSION_KEY,
+          JSON.stringify({
+            id: session.id,
+            name: session.full_name,
+            email: session.email,
+            role: "manager",
+            team: session.team || "—",
+          })
+        );
 
-    // ✅ Employee -> Sign In page (fill personal details)
-    if (role === "employee") {
-      if (!empId || !empPassword) return;
-      navigate("/employee-signin", { state: { empId } });
-      return;
+        localStorage.setItem(
+          "HRMSS_AUTH_SESSION",
+          JSON.stringify({ ...session, loginRole: "manager" })
+        );
+
+        goToSignIn("manager");
+        return;
+      }
+
+      // ✅ ADMIN (username + admin_id + password)
+      if (role === "admin") {
+        if (!adminUsername || !adminId || !adminPassword) {
+          setErr("Enter username, admin id and password");
+          return;
+        }
+
+        const session = await rpcVerify({
+          p_role: "admin",
+          p_identifier: adminUsername,
+          p_admin_id: adminId,
+          p_secret: adminPassword,
+        });
+
+        localStorage.setItem(
+          "HRMSS_AUTH_SESSION",
+          JSON.stringify({ ...session, loginRole: "admin" })
+        );
+
+        goToSignIn("admin");
+        return;
+      }
+
+      // ✅ Employee (keep your flow)
+      if (role === "employee") {
+        if (!empId || !empPassword) return;
+
+        // (optional) If you have employee login table later, validate here too
+        goToSignIn("employee", { empId });
+        return;
+      }
+    } catch (ex) {
+      setErr(ex?.message || "Login failed");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -178,6 +277,14 @@ const Login = () => {
 
               <div className="mt-2 text-xs text-gray-500">{roleTitle}</div>
 
+              {/* ERROR */}
+              {err && (
+                <div className="mt-5 rounded-xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm flex gap-2">
+                  <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                  <div className="min-w-0">{err}</div>
+                </div>
+              )}
+
               <form onSubmit={handleSubmit} className="mt-8 space-y-6">
                 {/* HR */}
                 {role === "hr" && (
@@ -215,7 +322,7 @@ const Login = () => {
                   </>
                 )}
 
-                {/* ✅ MANAGER */}
+                {/* MANAGER */}
                 {role === "manager" && (
                   <>
                     <Field
@@ -271,6 +378,29 @@ const Login = () => {
                       autoComplete="off"
                       required
                     />
+
+                    {/* ✅ Admin Password (important) */}
+                    <Field
+                      ref={adminPassRef}
+                      icon={Lock}
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter admin password"
+                      autoComplete="current-password"
+                      required
+                      right={
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setShowPassword((s) => !s);
+                            setTimeout(() => adminPassRef.current?.focus(), 0);
+                          }}
+                          className="shrink-0 text-gray-400 hover:text-gray-600"
+                        >
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      }
+                    />
                   </>
                 )}
 
@@ -318,20 +448,30 @@ const Login = () => {
 
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-md bg-purple-700 text-white font-semibold hover:bg-purple-800 transition shadow-md"
+                  disabled={loading}
+                  className={`w-full py-3 rounded-md text-white font-semibold transition shadow-md ${
+                    loading ? "bg-purple-400 cursor-not-allowed" : "bg-purple-700 hover:bg-purple-800"
+                  }`}
                 >
-                  Login
+                  {loading ? "Logging in..." : "Login"}
                 </button>
 
                 <div className="text-center text-xs text-gray-500">
                   Redirect:{" "}
                   <span className="font-semibold text-gray-700">
-                    {role === "hr" && "/hr-dashboard"}
-                    {role === "manager" && "/manager-dashboard"}
-                    {role === "admin" && "/dashboard"}
-                    {role === "employee" && "/employee-signin"}
+                    {role === "hr" && "/sign-in"}
+                    {role === "manager" && "/sign-in"}
+                    {role === "admin" && "/sign-in"}
+                    {role === "employee" && "/sign-in"}
                   </span>
                 </div>
+
+                {/* helpful hint */}
+                {!isSupabaseConfigured && (
+                  <div className="text-center text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    Supabase env missing. Add <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> in .env
+                  </div>
+                )}
               </form>
             </div>
           </div>
@@ -361,6 +501,4 @@ const Login = () => {
       </div>
     </div>
   );
-};
-
-export default Login;
+}

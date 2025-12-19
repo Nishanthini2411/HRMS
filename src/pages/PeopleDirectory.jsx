@@ -93,7 +93,7 @@ export default function PeopleDirectory() {
         {/* HEADER */}
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">People Directory</h1>
+            <h1 className="text-3xl font-bold text-slate-900">BirthDay</h1>
             <p className="text-sm text-slate-500">
               Company-wide employee directory (HR / Admin / Employee)
             </p>

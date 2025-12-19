@@ -23,16 +23,46 @@ import {
   HeartPulse,
 } from "lucide-react";
 
-const LS_KEY = "hrmss.employee.signin";
+const PROFILE_KEYS = {
+  employee: "hrmss.employee.signin",
+  hr: "hrmss.hr.signin",
+  admin: "hrmss.admin.signin",
+  manager: "hrmss.manager.signin",
+};
+
+const ROLE_LABELS = {
+  employee: "Employee",
+  hr: "HR",
+  admin: "Admin",
+  manager: "Manager",
+};
+
+const ROLE_REDIRECTS = {
+  employee: "/employee-dashboard",
+  hr: "/hr-dashboard",
+  admin: "/dashboard",
+  manager: "/manager-dashboard",
+};
+
+const COMPLETION_KEY = (role) => `hrmss.signin.completed.${role}`;
 
 export default function EmployeeSignIn() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const roleFromState = location.state?.role || "";
+  const roleFromStorage = localStorage.getItem("hrmss.lastRole") || "";
+  const role = roleFromState || roleFromStorage || "employee";
+  const roleLabel = ROLE_LABELS[role] || "User";
+  const redirectTo = location.state?.redirectTo || ROLE_REDIRECTS[role] || "/login";
+  const profileKey = PROFILE_KEYS[role] || PROFILE_KEYS.employee;
+
   const empIdFromLogin = location.state?.empId || "";
 
+  const [error, setError] = useState("");
+
   const [form, setForm] = useState(() => {
-    const saved = localStorage.getItem(LS_KEY);
+    const saved = localStorage.getItem(profileKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -160,6 +190,10 @@ export default function EmployeeSignIn() {
     setForm((p) => ({ ...p, employeeId: empIdFromLogin }));
   }, [empIdFromLogin]);
 
+  useEffect(() => {
+    if (role) localStorage.setItem("hrmss.lastRole", role);
+  }, [role]);
+
   const onChange = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   const updateEducation = (index, key, value) => {
@@ -262,8 +296,29 @@ export default function EmployeeSignIn() {
   }, [form]);
 
   const saveAndContinue = () => {
-    localStorage.setItem(LS_KEY, JSON.stringify(form));
-    navigate("/employee-dashboard");
+    const requiredFields = [
+      { key: "fullName", label: "Full Name" },
+      { key: "personalEmail", label: "Personal Email" },
+      { key: "mobileNumber", label: "Mobile Number" },
+    ];
+
+    if (role === "employee" || empIdFromLogin) {
+      requiredFields.push({ key: "employeeId", label: "Employee ID" });
+    }
+
+    const missing = requiredFields.filter(
+      (field) => !String(form[field.key] || "").trim()
+    );
+
+    if (missing.length) {
+      setError("Please fill the required fields to continue.");
+      return;
+    }
+
+    setError("");
+    localStorage.setItem(profileKey, JSON.stringify(form));
+    localStorage.setItem(COMPLETION_KEY(role), "true");
+    navigate(redirectTo);
   };
 
   return (
@@ -275,7 +330,7 @@ export default function EmployeeSignIn() {
             <button
               type="button"
               onClick={() => {
-                localStorage.setItem(LS_KEY, JSON.stringify(form));
+                localStorage.setItem(profileKey, JSON.stringify(form));
                 navigate(-1);
               }}
               className="mt-0.5 inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
@@ -286,13 +341,18 @@ export default function EmployeeSignIn() {
 
             <div>
               <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">
-                Employee Sign In
+                {roleLabel} Sign In
               </h1>
               <p className="text-sm text-slate-500">
                 Personal details fill pannunga •{" "}
                 <span className="font-semibold text-slate-800">{completeness}%</span>{" "}
                 completed
               </p>
+              {error ? (
+                <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {error}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -300,7 +360,7 @@ export default function EmployeeSignIn() {
             <button
               type="button"
               onClick={() => {
-                localStorage.removeItem(LS_KEY);
+                localStorage.removeItem(profileKey);
 
                 // revoke old avatar URL if blob
                 if (form.avatar && String(form.avatar).startsWith("blob:")) {

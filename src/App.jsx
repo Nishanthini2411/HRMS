@@ -68,7 +68,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/people" element={<PeopleDirectory />} />
 
-      {/* ✅ NEW ROUTE: Employee login -> Sign In (fill personal details) */}
+      {/* ✅ NEW ROUTE: Sign In (fill personal details) */}
+      <Route path="/sign-in" element={<EmployeeSignIn />} />
       <Route path="/employee-signin" element={<EmployeeSignIn />} />
 
       {/* ================= HR ================= */}

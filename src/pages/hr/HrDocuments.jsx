@@ -1,7 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   UploadCloud,
-  FileText,
   Download,
   Trash2,
   Eye,
@@ -9,6 +8,7 @@ import {
   Grid,
   List,
 } from "lucide-react";
+import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 
 // Helpers
 const formatBytes = (bytes) => {
@@ -38,6 +38,7 @@ const badgeColor = (type) => {
 
 export default function HrDocuments() {
   const fileRef = useRef(null);
+  const toastTimerRef = useRef(null);
 
   const [docs, setDocs] = useState([]);
   const [title, setTitle] = useState("");
@@ -45,6 +46,30 @@ export default function HrDocuments() {
   const [file, setFile] = useState(null);
   const [search, setSearch] = useState("");
   const [view, setView] = useState("table"); // table | grid
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState(null);
+
+  const bucketName = "hr-documents";
+  const tableName = "hr_documents";
+
+  const showToast = (message) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message });
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000);
+  };
+
+  const logSupabase = (action, payload, result) => {
+    const status = result?.error?.status ?? result?.status ?? "ok";
+    console.log("[supabase]", action, {
+      table: tableName,
+      payload,
+      data: result?.data,
+      error: result?.error,
+      status,
+    });
+  };
 
   const pickFile = (e) => {
     const f = e.target.files?.[0];
@@ -53,25 +78,118 @@ export default function HrDocuments() {
     if (!title) setTitle(f.name.replace(/\.[^/.]+$/, ""));
   };
 
-  const upload = () => {
+  const upload = async () => {
     if (!file || !title) return alert("Title & file required");
-    const doc = {
-      id: crypto.randomUUID(),
+    if (!isSupabaseConfigured) return alert("Supabase is not configured");
+
+    setBusy(true);
+    setError("");
+    const filePath = `${crypto.randomUUID()}-${file.name}`;
+
+    const uploadResult = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, file, { cacheControl: "3600", upsert: false });
+
+    logSupabase(
+      "storage.upload",
+      { bucket: bucketName, filePath, size: file.size, type: file.type },
+      uploadResult
+    );
+
+    if (uploadResult.error) {
+      setError(uploadResult.error.message);
+      showToast(`Supabase failed: ${uploadResult.error.message}`);
+      setBusy(false);
+      return;
+    }
+
+    const insertPayload = {
       title,
       category,
-      fileName: file.name,
+      file_name: file.name,
       size: file.size,
-      type: getFileType(file),
-      url: URL.createObjectURL(file),
-      date: new Date().toLocaleString(),
+      mime_type: file.type,
+      storage_path: filePath,
     };
+
+    const insertResult = await supabase
+      .from(tableName)
+      .insert([insertPayload])
+      .select()
+      .single();
+
+    logSupabase("table.insert", insertPayload, insertResult);
+
+    if (insertResult.error) {
+      setError(insertResult.error.message);
+      showToast(`Supabase failed: ${insertResult.error.message}`);
+      setBusy(false);
+      return;
+    }
+
+    const publicResult = supabase.storage.from(bucketName).getPublicUrl(filePath);
+    logSupabase("storage.getPublicUrl", { bucket: bucketName, filePath }, publicResult);
+
+    const doc = {
+      id: insertResult.data.id,
+      title: insertResult.data.title,
+      category: insertResult.data.category,
+      fileName: insertResult.data.file_name,
+      size: insertResult.data.size,
+      type: getFileType({ type: insertResult.data.mime_type }),
+      url: publicResult?.data?.publicUrl || "",
+      storagePath: insertResult.data.storage_path,
+      date: insertResult.data.created_at
+        ? new Date(insertResult.data.created_at).toLocaleString()
+        : new Date().toLocaleString(),
+    };
+
     setDocs((p) => [doc, ...p]);
     setTitle("");
     setFile(null);
     fileRef.current.value = "";
+    setBusy(false);
   };
 
-  const remove = (id) => setDocs((p) => p.filter((d) => d.id !== id));
+  const remove = async (doc) => {
+    if (!isSupabaseConfigured) return;
+    setBusy(true);
+    setError("");
+
+    const deleteResult = await supabase
+      .from(tableName)
+      .delete()
+      .eq("id", doc.id);
+
+    logSupabase("table.delete", { id: doc.id }, deleteResult);
+
+    if (deleteResult.error) {
+      setError(deleteResult.error.message);
+      showToast(`Supabase failed: ${deleteResult.error.message}`);
+      setBusy(false);
+      return;
+    }
+
+    if (doc.storagePath) {
+      const storageRemoveResult = await supabase.storage
+        .from(bucketName)
+        .remove([doc.storagePath]);
+
+      logSupabase(
+        "storage.remove",
+        { bucket: bucketName, storagePath: doc.storagePath },
+        storageRemoveResult
+      );
+
+      if (storageRemoveResult.error) {
+        setError(storageRemoveResult.error.message);
+        showToast(`Supabase failed: ${storageRemoveResult.error.message}`);
+      }
+    }
+
+    setDocs((p) => p.filter((d) => d.id !== doc.id));
+    setBusy(false);
+  };
 
   const filtered = useMemo(() => {
     return docs.filter(
@@ -81,8 +199,74 @@ export default function HrDocuments() {
     );
   }, [docs, search]);
 
+  useEffect(() => {
+    console.log("[env] VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL);
+    console.log(
+      "[env] VITE_SUPABASE_ANON_KEY (first 20):",
+      import.meta.env.VITE_SUPABASE_ANON_KEY?.slice(0, 20)
+    );
+  }, []);
+
+  useEffect(() => {
+    const loadDocs = async () => {
+      if (!isSupabaseConfigured) return;
+      setLoading(true);
+      setError("");
+
+      const loadResult = await supabase
+        .from(tableName)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      logSupabase("table.select", { order: "created_at desc" }, loadResult);
+
+      if (loadResult.error) {
+        setError(loadResult.error.message);
+        showToast(`Supabase failed: ${loadResult.error.message}`);
+        setLoading(false);
+        return;
+      }
+
+      const mapped = loadResult.data.map((row) => {
+        const publicResult = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(row.storage_path);
+
+        logSupabase(
+          "storage.getPublicUrl",
+          { bucket: bucketName, filePath: row.storage_path },
+          publicResult
+        );
+
+        return {
+          id: row.id,
+          title: row.title,
+          category: row.category,
+          fileName: row.file_name,
+          size: row.size,
+          type: getFileType({ type: row.mime_type }),
+          url: publicResult?.data?.publicUrl || "",
+          storagePath: row.storage_path,
+          date: row.created_at
+            ? new Date(row.created_at).toLocaleString()
+            : new Date().toLocaleString(),
+        };
+      });
+
+      setDocs(mapped);
+      setLoading(false);
+    };
+
+    loadDocs();
+  }, []);
+
   return (
     <section className="space-y-6">
+      {toast && (
+        <div className="fixed right-4 top-4 z-50 rounded-lg bg-rose-600 px-4 py-2 text-sm text-white shadow-lg">
+          {toast.message}
+        </div>
+      )}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">HR Documents</h1>
@@ -155,7 +339,8 @@ export default function HrDocuments() {
           </select>
           <button
             onClick={upload}
-            className="rounded-xl bg-purple-700 text-white font-semibold text-sm hover:bg-purple-800"
+            disabled={busy}
+            className="rounded-xl bg-purple-700 text-white font-semibold text-sm hover:bg-purple-800 disabled:opacity-60"
           >
             Upload Document
           </button>
@@ -174,6 +359,19 @@ export default function HrDocuments() {
         />
       </div>
 
+      {!isSupabaseConfigured && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Supabase is not configured. Add `VITE_SUPABASE_URL` and
+          `VITE_SUPABASE_ANON_KEY` in your `.env` file.
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
       {view === "table" && (
         <div className="bg-white rounded-2xl border overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -186,7 +384,14 @@ export default function HrDocuments() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {filtered.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan="4" className="text-center py-10 text-gray-500">
+                    Loading documents...
+                  </td>
+                </tr>
+              )}
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan="4" className="text-center py-10 text-gray-500">
                     No documents found
@@ -214,13 +419,24 @@ export default function HrDocuments() {
                   <td className="px-4 py-3">{formatBytes(d.size)}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
-                      <a href={d.url} target="_blank" rel="noreferrer">
+                      <a
+                        href={d.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={d.url ? "" : "pointer-events-none opacity-50"}
+                        aria-disabled={!d.url}
+                      >
                         <Eye size={16} />
                       </a>
-                      <a href={d.url} download>
+                      <a
+                        href={d.url}
+                        download
+                        className={d.url ? "" : "pointer-events-none opacity-50"}
+                        aria-disabled={!d.url}
+                      >
                         <Download size={16} />
                       </a>
-                      <button onClick={() => remove(d.id)}>
+                      <button onClick={() => remove(d)} disabled={busy}>
                         <Trash2 size={16} className="text-rose-600" />
                       </button>
                     </div>
@@ -248,13 +464,24 @@ export default function HrDocuments() {
               <p className="text-xs mt-1">{formatBytes(d.size)}</p>
 
               <div className="flex justify-end gap-3 mt-4">
-                <a href={d.url} target="_blank" rel="noreferrer">
+                <a
+                  href={d.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={d.url ? "" : "pointer-events-none opacity-50"}
+                  aria-disabled={!d.url}
+                >
                   <Eye size={16} />
                 </a>
-                <a href={d.url} download>
+                <a
+                  href={d.url}
+                  download
+                  className={d.url ? "" : "pointer-events-none opacity-50"}
+                  aria-disabled={!d.url}
+                >
                   <Download size={16} />
                 </a>
-                <button onClick={() => remove(d.id)}>
+                <button onClick={() => remove(d)} disabled={busy}>
                   <Trash2 size={16} className="text-rose-600" />
                 </button>
               </div>
@@ -264,7 +491,7 @@ export default function HrDocuments() {
       )}
 
       <p className="text-xs text-gray-400">
-        Demo UI only — connect to storage/back-end for persistence.
+        Supabase-connected storage for HR documents.
       </p>
     </section>
   );

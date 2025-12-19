@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LayoutDashboard, CalendarDays, ClipboardList, LogOut, UserRound, Bell, WalletCards, FileText } from "lucide-react";
 
@@ -20,6 +21,12 @@ const SideItem = ({ to, icon: Icon, label, end }) => (
 
 export default function HrLayout() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (localStorage.getItem("hrmss.signin.completed.hr") !== "true") {
+      navigate("/sign-in", { state: { role: "hr" } });
+    }
+  }, [navigate]);
 
   const handleLogout = () => {
     navigate("/login");
