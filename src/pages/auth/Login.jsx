@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Mail, Lock, User, IdCard, Eye, EyeOff, AlertTriangle } from "lucide-react";
 
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
-import { MANAGER_SESSION_KEY } from "../manager/managerData";
+import { MANAGER_SESSION_KEY, managerAccounts } from "../manager/managerData";
 
 /* ---------------- Field ---------------- */
 const Field = forwardRef(

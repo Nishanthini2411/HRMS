@@ -41,6 +41,12 @@ import ManagerApprovals from "./pages/manager/ManagerApprovals.jsx";
 import ManagerTeam from "./pages/manager/ManagerTeam.jsx";
 import ManagerPayroll from "./pages/manager/ManagerPayroll.jsx";
 import ManagerNotifications from "./pages/manager/ManagerNotifications.jsx";
+import ManagerApproverLayout from "./pages/managerApprover/ManagerApproverLayout.jsx";
+import ManagerApproverDashboard from "./pages/managerApprover/ManagerApproverDashboard.jsx";
+import ManagerApproverApprovals from "./pages/managerApprover/ManagerApproverApprovals.jsx";
+import ManagerApproverTeam from "./pages/managerApprover/ManagerApproverTeam.jsx";
+import ManagerApproverPayroll from "./pages/managerApprover/ManagerApproverPayroll.jsx";
+import ManagerApproverNotifications from "./pages/managerApprover/ManagerApproverNotifications.jsx";
 
 /* ================= EMPLOYEE ================= */
 import EmployeeLayout from "./pages/employee/EmployeeLayout.jsx";
@@ -116,6 +122,14 @@ export default function App() {
         <Route path="team" element={<ManagerTeam />} />
         <Route path="payroll" element={<ManagerPayroll />} />
         <Route path="notifications" element={<ManagerNotifications />} />
+      </Route>
+
+      <Route path="/manager-approver-dashboard" element={<ManagerApproverLayout />}>
+        <Route index element={<ManagerApproverDashboard />} />
+        <Route path="approvals" element={<ManagerApproverApprovals />} />
+        <Route path="team" element={<ManagerApproverTeam />} />
+        <Route path="payroll" element={<ManagerApproverPayroll />} />
+        <Route path="notifications" element={<ManagerApproverNotifications />} />
       </Route>
 
       {/* ================= EMPLOYEE ================= */}

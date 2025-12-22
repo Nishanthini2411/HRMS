@@ -102,8 +102,100 @@ const seedAdminProfile = {
   ],
 };
 
+const LS_KEY = "hrmss.admin.signin";
+
 export default function AdminProfile() {
-  const [profile, setProfile] = useState(seedAdminProfile);
+  const [profile, setProfile] = useState(() => {
+    const base = seedAdminProfile;
+    let saved = null;
+
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) saved = JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+
+    if (!saved) return base;
+
+    const mergedEmergency =
+      Array.isArray(base?.emergencyContacts) && base.emergencyContacts.length
+        ? base.emergencyContacts
+        : saved?.emergencyName || saved?.emergencyContactNumber
+          ? [
+              {
+                name: saved.emergencyName || "",
+                relation: saved.emergencyRelationship || "",
+                phone: saved.emergencyContactNumber || "",
+              },
+            ]
+          : base?.emergencyContacts || [];
+
+    return {
+      ...base,
+      avatar: saved.avatar || base?.avatar || "",
+      name: saved.fullName || base?.name || "",
+      id: saved.employeeId || base?.id || "",
+
+      personal: {
+        ...(base?.personal || {}),
+        dob: saved.dob || base?.personal?.dob || "",
+        email:
+          saved.personalEmail ||
+          saved.officialEmail ||
+          saved.email ||
+          base?.personal?.email ||
+          "",
+        phone:
+          saved.mobileNumber ||
+          saved.phone ||
+          base?.personal?.phone ||
+          "",
+        address:
+          saved.currentAddress ||
+          saved.address ||
+          base?.personal?.address ||
+          "",
+
+        gender: saved.gender || base?.personal?.gender || "",
+        maritalStatus: saved.maritalStatus || "",
+        bloodGroup: saved.bloodGroup || "",
+
+        personalEmail: saved.personalEmail || "",
+        officialEmail: saved.officialEmail || "",
+        mobileNumber: saved.mobileNumber || "",
+        alternateContactNumber: saved.alternateContactNumber || "",
+
+        currentAddress: saved.currentAddress || "",
+        permanentAddress: saved.permanentAddress || "",
+      },
+
+      job: {
+        ...(base?.job || {}),
+        employeeId: saved.employeeId || base?.job?.employeeId || "",
+        location: saved.location || base?.job?.location || "",
+      },
+
+      education: Array.isArray(saved.education) ? saved.education : base?.education || [],
+      experience: Array.isArray(saved.experience) ? saved.experience : base?.experience || [],
+
+      skills: {
+        primarySkills: saved.primarySkills || base?.skills?.primarySkills || "",
+        secondarySkills: saved.secondarySkills || base?.skills?.secondarySkills || "",
+        toolsTechnologies: saved.toolsTechnologies || base?.skills?.toolsTechnologies || "",
+      },
+
+      bank: {
+        accountHolderName: saved.accountHolderName || base?.bank?.accountHolderName || "",
+        bankName: saved.bankName || base?.bank?.bankName || "",
+        accountNumber: saved.accountNumber || base?.bank?.accountNumber || "",
+        ifscCode: saved.ifscCode || base?.bank?.ifscCode || "",
+        branch: saved.branch || base?.bank?.branch || "",
+      },
+
+      emergencyContacts: mergedEmergency,
+    };
+  });
 
   const [editProfile, setEditProfile] = useState(false);
   const [addEmergency, setAddEmergency] = useState(false);
