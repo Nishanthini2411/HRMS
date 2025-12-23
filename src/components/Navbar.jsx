@@ -1,5 +1,9 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { Bell, UserRound } from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
+
+const AUTH_KEY = "HRMSS_AUTH_SESSION";
+const COMPLETION_KEY = "hrmss.signin.completed.admin";
 
 const linkClasses = ({ isActive }) =>
   `inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${
@@ -9,6 +13,20 @@ const linkClasses = ({ isActive }) =>
   }`;
 
 const Navbar = () => {
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // noop: fallback to local cleanup
+    }
+
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(COMPLETION_KEY);
+    navigate("/login", { replace: true });
+  };
+
   return (
     <header className="h-14 bg-white border-b flex items-center justify-between px-6">
       <h2 className="text-lg font-semibold text-gray-800">Admin Dashboard</h2>
@@ -22,7 +40,10 @@ const Navbar = () => {
           My Profile
         </NavLink>
         <span className="text-gray-500">Welcome, Admin</span>
-        <button className="px-3 py-1 text-xs rounded-md border border-gray-300 hover:bg-gray-100">
+        <button
+          onClick={handleLogout}
+          className="px-3 py-1 text-xs rounded-md border border-gray-300 hover:bg-gray-100"
+        >
           Logout
         </button>
       </div>

@@ -1,5 +1,6 @@
 // src/pages/hr/Employees.jsx
 import React, { useState, useMemo } from "react";
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
 /* ---------------------- SAMPLE DATA ---------------------- */
 const initialEmployees = [
@@ -96,8 +97,7 @@ export default function Employees() {
         : [...p.workLocations, loc];
 
       // If "Other" unchecked, clear other text
-      const nextOther =
-        loc === "Other" && exists ? "" : p.otherWorkLocation;
+      const nextOther = loc === "Other" && exists ? "" : p.otherWorkLocation;
 
       return { ...p, workLocations: next, otherWorkLocation: nextOther };
     });
@@ -114,7 +114,7 @@ export default function Employees() {
     return [...base, ...other].join(", ");
   };
 
-  const handleAddEmployee = (e) => {
+  const handleAddEmployee = async (e) => {
     e.preventDefault();
 
     if (
@@ -127,15 +127,46 @@ export default function Employees() {
       return;
     }
 
+    // ✅ Local duplicate check
+    const exists = employees.some(
+      (x) => String(x.id || "").toLowerCase() === String(newEmployee.id).toLowerCase()
+    );
+    if (exists) {
+      alert("This Employee ID already exists");
+      return;
+    }
+
+    // ✅ Save ID + Password into Supabase (so ONLY that employee can login)
+    // Requires SQL RPC function: upsert_employee_account(p_employee_id text, p_password text)
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase.rpc("upsert_employee_account", {
+          p_employee_id: String(newEmployee.id || "").trim(),
+          p_password: String(newEmployee.password || ""),
+        });
+        if (error) throw error;
+      } catch (err) {
+        console.error(err);
+        alert(err?.message || "Failed to save employee login credentials");
+        return;
+      }
+    } else {
+      // If supabase env missing, still allow UI add, but login restriction won't work.
+      console.warn("Supabase not configured. Employee credentials not saved.");
+    }
+
     const locationText = buildLocationText(
       newEmployee.workLocations,
       newEmployee.otherWorkLocation
     );
 
+    // ✅ Do NOT store password in UI state list
+    const { password, ...safeEmployee } = newEmployee;
+
     setEmployees((prev) => [
       ...prev,
       {
-        ...newEmployee,
+        ...safeEmployee,
         // keep your existing optional fields
         email: "",
         phone: "",
@@ -325,7 +356,10 @@ export default function Employees() {
               </button>
             </div>
 
-            <form onSubmit={handleAddEmployee} className="grid gap-4 md:grid-cols-2">
+            <form
+              onSubmit={handleAddEmployee}
+              className="grid gap-4 md:grid-cols-2"
+            >
               <input
                 name="id"
                 value={newEmployee.id}
@@ -420,7 +454,10 @@ export default function Employees() {
                 </p>
                 <div className="mt-3 flex flex-wrap gap-4">
                   {WORK_LOCATIONS.map((loc) => (
-                    <label key={loc} className="flex items-center gap-2 text-sm text-slate-700">
+                    <label
+                      key={loc}
+                      className="flex items-center gap-2 text-sm text-slate-700"
+                    >
                       <input
                         type="checkbox"
                         checked={newEmployee.workLocations.includes(loc)}

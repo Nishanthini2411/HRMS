@@ -9,8 +9,12 @@ const statusTone = {
 };
 
 export default function ManagerApprovals() {
-  const session = getManagerSession();
-  const canAct = session.role === "approver";
+  // ✅ fallback session (if null)
+  const session = getManagerSession() || { name: "Manager", role: "approver" };
+
+  // ✅ IMPORTANT: Always allow approve / reject on this page
+  const canAct = true;
+
   const [requests, setRequests] = useState(seedRequests);
 
   const metrics = useMemo(() => {
@@ -20,7 +24,7 @@ export default function ManagerApprovals() {
   }, [requests]);
 
   const handleAction = (id, status) => {
-    if (!canAct) return;
+    // ✅ now always allowed
     setRequests((prev) =>
       prev.map((r) =>
         r.id === id
@@ -52,6 +56,8 @@ export default function ManagerApprovals() {
           <span className="inline-flex items-center gap-1 bg-emerald-100 px-3 py-1 rounded-full text-emerald-700 font-semibold border border-emerald-200">
             <Check size={14} /> Approved: {metrics.approved}
           </span>
+
+          {/* ✅ show role as Approver always */}
           <span
             className={`inline-flex items-center gap-1 px-3 py-1 rounded-full font-semibold ${
               canAct ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-600"
@@ -103,6 +109,7 @@ export default function ManagerApprovals() {
               >
                 Approve
               </button>
+
               <button
                 disabled={!canAct}
                 onClick={() => handleAction(req.id, "Rejected")}
@@ -114,6 +121,7 @@ export default function ManagerApprovals() {
               >
                 Reject
               </button>
+
               {!canAct && (
                 <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                   <Eye size={14} /> View only (no actions)
@@ -124,6 +132,7 @@ export default function ManagerApprovals() {
         ))}
       </div>
 
+      {/* ✅ Since canAct is always true now, this block will never show, but kept (no UI removal) */}
       {!canAct && (
         <div className="rounded-2xl border border-dashed bg-slate-50 p-4 text-sm text-slate-600 flex gap-2 items-start">
           <AlertCircle size={16} className="text-amber-600 mt-0.5" />

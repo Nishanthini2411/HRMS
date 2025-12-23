@@ -1,5 +1,5 @@
 // src/pages/admin/AdminProfile.jsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   MapPin,
   IdCard,
@@ -15,6 +15,7 @@ import {
   Home,
 } from "lucide-react";
 import DocumentManager from "../../components/DocumentManager.jsx";
+import { supabase } from "../../lib/supabaseClient";
 
 /* ===================== SEED (Admin + Employee-like fields) ===================== */
 const seedAdminProfile = {
@@ -42,7 +43,6 @@ const seedAdminProfile = {
     phone: "+91 90000 12001",
   },
 
-  // ✅ includes Add-Employee style fields
   job: {
     employeeId: "ADM-001",
     title: "System Administrator",
@@ -92,9 +92,7 @@ const seedAdminProfile = {
     branch: "Chennai Main",
   },
 
-  emergencyContacts: [
-    { name: "Anu Nair", relation: "Spouse", phone: "+91 98888 12001" },
-  ],
+  emergencyContacts: [{ name: "Anu Nair", relation: "Spouse", phone: "+91 98888 12001" }],
 
   idProofs: [
     { type: "Aadhaar", number: "XXXX-XXXX-4021", status: "Verified" },
@@ -102,100 +100,89 @@ const seedAdminProfile = {
   ],
 };
 
-const LS_KEY = "hrmss.admin.signin";
+const AUTH_KEY = "HRMSS_AUTH_SESSION";
+
+function readAuthSession() {
+  try {
+    const raw = localStorage.getItem(AUTH_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rowToAdminProfile(row, base = seedAdminProfile) {
+  const emergencyContacts =
+    row?.emergency_name || row?.emergency_contact_number
+      ? [
+          {
+            name: row?.emergency_name || "",
+            relation: row?.emergency_relationship || "",
+            phone: row?.emergency_contact_number || "",
+          },
+        ]
+      : base?.emergencyContacts || [];
+
+  return {
+    ...base,
+
+    avatar: row?.avatar_url || base?.avatar || "",
+    name: row?.full_name || base?.name || "",
+    id: row?.employee_id || base?.id || "",
+
+    personal: {
+      ...(base?.personal || {}),
+      dob: row?.dob || base?.personal?.dob || "",
+      gender: row?.gender || base?.personal?.gender || "",
+      maritalStatus: row?.marital_status || base?.personal?.maritalStatus || "",
+      bloodGroup: row?.blood_group || base?.personal?.bloodGroup || "",
+
+      personalEmail: row?.personal_email || base?.personal?.personalEmail || "",
+      officialEmail: row?.official_email || base?.personal?.officialEmail || "",
+      email: row?.official_email || base?.personal?.email || "",
+
+      mobileNumber: row?.mobile_number || base?.personal?.mobileNumber || "",
+      alternateContactNumber:
+        row?.alternate_contact_number || base?.personal?.alternateContactNumber || "",
+
+      currentAddress: row?.current_address || base?.personal?.currentAddress || "",
+      permanentAddress: row?.permanent_address || base?.personal?.permanentAddress || "",
+      address: row?.current_address || base?.personal?.address || "",
+
+      phone: row?.mobile_number || base?.personal?.phone || "",
+    },
+
+    job: {
+      ...(base?.job || {}),
+      employeeId: row?.employee_id || base?.job?.employeeId || "",
+      location: row?.location || base?.job?.location || "",
+    },
+
+    education: Array.isArray(row?.education) ? row.education : base?.education || [],
+    experience: Array.isArray(row?.experience) ? row.experience : base?.experience || [],
+
+    skills: {
+      primarySkills: row?.primary_skills || base?.skills?.primarySkills || "",
+      secondarySkills: row?.secondary_skills || base?.skills?.secondarySkills || "",
+      toolsTechnologies: row?.tools_technologies || base?.skills?.toolsTechnologies || "",
+    },
+
+    bank: {
+      accountHolderName: row?.account_holder_name || base?.bank?.accountHolderName || "",
+      bankName: row?.bank_name || base?.bank?.bankName || "",
+      accountNumber: row?.account_number || base?.bank?.accountNumber || "",
+      ifscCode: row?.ifsc_code || base?.bank?.ifscCode || "",
+      branch: row?.branch || base?.bank?.branch || "",
+    },
+
+    emergencyContacts,
+    idProofs: base?.idProofs || [],
+  };
+}
 
 export default function AdminProfile() {
-  const [profile, setProfile] = useState(() => {
-    const base = seedAdminProfile;
-    let saved = null;
-
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) saved = JSON.parse(raw);
-    } catch {
-      // ignore
-    }
-
-    if (!saved) return base;
-
-    const mergedEmergency =
-      Array.isArray(base?.emergencyContacts) && base.emergencyContacts.length
-        ? base.emergencyContacts
-        : saved?.emergencyName || saved?.emergencyContactNumber
-          ? [
-              {
-                name: saved.emergencyName || "",
-                relation: saved.emergencyRelationship || "",
-                phone: saved.emergencyContactNumber || "",
-              },
-            ]
-          : base?.emergencyContacts || [];
-
-    return {
-      ...base,
-      avatar: saved.avatar || base?.avatar || "",
-      name: saved.fullName || base?.name || "",
-      id: saved.employeeId || base?.id || "",
-
-      personal: {
-        ...(base?.personal || {}),
-        dob: saved.dob || base?.personal?.dob || "",
-        email:
-          saved.personalEmail ||
-          saved.officialEmail ||
-          saved.email ||
-          base?.personal?.email ||
-          "",
-        phone:
-          saved.mobileNumber ||
-          saved.phone ||
-          base?.personal?.phone ||
-          "",
-        address:
-          saved.currentAddress ||
-          saved.address ||
-          base?.personal?.address ||
-          "",
-
-        gender: saved.gender || base?.personal?.gender || "",
-        maritalStatus: saved.maritalStatus || "",
-        bloodGroup: saved.bloodGroup || "",
-
-        personalEmail: saved.personalEmail || "",
-        officialEmail: saved.officialEmail || "",
-        mobileNumber: saved.mobileNumber || "",
-        alternateContactNumber: saved.alternateContactNumber || "",
-
-        currentAddress: saved.currentAddress || "",
-        permanentAddress: saved.permanentAddress || "",
-      },
-
-      job: {
-        ...(base?.job || {}),
-        employeeId: saved.employeeId || base?.job?.employeeId || "",
-        location: saved.location || base?.job?.location || "",
-      },
-
-      education: Array.isArray(saved.education) ? saved.education : base?.education || [],
-      experience: Array.isArray(saved.experience) ? saved.experience : base?.experience || [],
-
-      skills: {
-        primarySkills: saved.primarySkills || base?.skills?.primarySkills || "",
-        secondarySkills: saved.secondarySkills || base?.skills?.secondarySkills || "",
-        toolsTechnologies: saved.toolsTechnologies || base?.skills?.toolsTechnologies || "",
-      },
-
-      bank: {
-        accountHolderName: saved.accountHolderName || base?.bank?.accountHolderName || "",
-        bankName: saved.bankName || base?.bank?.bankName || "",
-        accountNumber: saved.accountNumber || base?.bank?.accountNumber || "",
-        ifscCode: saved.ifscCode || base?.bank?.ifscCode || "",
-        branch: saved.branch || base?.bank?.branch || "",
-      },
-
-      emergencyContacts: mergedEmergency,
-    };
-  });
+  const [profile, setProfile] = useState(seedAdminProfile);
+  const [loading, setLoading] = useState(true);
 
   const [editProfile, setEditProfile] = useState(false);
   const [addEmergency, setAddEmergency] = useState(false);
@@ -203,8 +190,56 @@ export default function AdminProfile() {
   const [addId, setAddId] = useState(false);
   const [editId, setEditId] = useState(null);
 
-  const { name, id, personal, job, emergencyContacts, idProofs, avatar } =
-    profile;
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        setLoading(true);
+
+        // Try Supabase auth session first
+        const { data: sessionData } = await supabase.auth.getSession();
+        const user = sessionData?.session?.user || null;
+
+        // Fallback to your RPC session cache
+        const authCache = readAuthSession();
+        const userId = user?.id || authCache?.id || null;
+
+        if (!userId) {
+          // no session -> keep seed
+          if (mounted) setProfile(seedAdminProfile);
+          return;
+        }
+
+        // Fetch admin profile row
+        const { data: row, error } = await supabase
+          .from("hrmss_profiles")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("role", "admin")
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (!mounted) return;
+
+        if (row) setProfile(rowToAdminProfile(row, seedAdminProfile));
+        else setProfile(seedAdminProfile);
+      } catch (e) {
+        // if fetch fails -> keep seed
+        if (mounted) setProfile(seedAdminProfile);
+        console.error("AdminProfile load error:", e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const { name, id, personal, job, emergencyContacts, idProofs, avatar } = profile;
 
   const education = Array.isArray(profile.education) ? profile.education : [];
   const experience = Array.isArray(profile.experience) ? profile.experience : [];
@@ -217,6 +252,16 @@ export default function AdminProfile() {
     if (!file) return;
     setProfile({ ...profile, avatar: URL.createObjectURL(file) });
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <div className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+          Loading profile...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -328,7 +373,7 @@ export default function AdminProfile() {
             </div>
           </SectionCard>
 
-          {/* JOB INFORMATION (includes Add-Employee style fields) */}
+          {/* JOB INFORMATION */}
           <SectionCard title="Job Information">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 pt-4">
               <Detail label="ADMIN ID" value={job?.employeeId} />
@@ -354,20 +399,14 @@ export default function AdminProfile() {
                     </div>
                     <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5">
                       <Detail label="QUALIFICATION" value={e.qualification} />
-                      <Detail
-                        label="INSTITUTION / UNIVERSITY"
-                        value={e.institution}
-                      />
+                      <Detail label="INSTITUTION / UNIVERSITY" value={e.institution} />
                       <Detail label="YEAR OF PASSING" value={e.yearOfPassing} />
                       <Detail label="SPECIALIZATION" value={e.specialization} />
                     </div>
                   </div>
                 ))
               ) : (
-                <EmptyHint
-                  icon={GraduationCap}
-                  text="No education details added yet."
-                />
+                <EmptyHint icon={GraduationCap} text="No education details added yet." />
               )}
             </div>
           </SectionCard>
@@ -386,18 +425,12 @@ export default function AdminProfile() {
                       <Detail label="ORGANIZATION" value={ex.organization} />
                       <Detail label="DESIGNATION" value={ex.designation} />
                       <Detail label="DURATION" value={ex.duration} />
-                      <Detail
-                        label="REASON FOR LEAVING"
-                        value={ex.reasonForLeaving}
-                      />
+                      <Detail label="REASON FOR LEAVING" value={ex.reasonForLeaving} />
                     </div>
                   </div>
                 ))
               ) : (
-                <EmptyHint
-                  icon={Briefcase}
-                  text="No experience details added yet."
-                />
+                <EmptyHint icon={Briefcase} text="No experience details added yet." />
               )}
             </div>
           </SectionCard>
@@ -407,21 +440,14 @@ export default function AdminProfile() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 pt-4">
               <Detail label="PRIMARY SKILLS" value={skills.primarySkills} />
               <Detail label="SECONDARY SKILLS" value={skills.secondarySkills} />
-              <Detail
-                label="TOOLS / TECHNOLOGIES"
-                value={skills.toolsTechnologies}
-                full
-              />
+              <Detail label="TOOLS / TECHNOLOGIES" value={skills.toolsTechnologies} full />
             </div>
           </SectionCard>
 
-          {/* BANK & PAYROLL */}
+          {/* BANK */}
           <SectionCard title="Bank & Payroll Details">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 pt-4">
-              <Detail
-                label="ACCOUNT HOLDER NAME"
-                value={bank.accountHolderName}
-              />
+              <Detail label="ACCOUNT HOLDER NAME" value={bank.accountHolderName} />
               <Detail label="BANK NAME" value={bank.bankName} />
               <Detail label="ACCOUNT NUMBER" value={bank.accountNumber} />
               <Detail label="IFSC CODE" value={bank.ifscCode} />
@@ -432,14 +458,10 @@ export default function AdminProfile() {
 
         {/* RIGHT */}
         <div className="space-y-6">
-          {/* EMERGENCY CONTACT */}
           <SectionCard
             title="Emergency Contact"
             action={
-              <button
-                onClick={() => setAddEmergency(true)}
-                className="text-blue-600 text-sm"
-              >
+              <button onClick={() => setAddEmergency(true)} className="text-blue-600 text-sm">
                 + Add
               </button>
             }
@@ -452,54 +474,34 @@ export default function AdminProfile() {
                   <p className="text-sm flex gap-1 items-center mt-1">
                     <Phone size={14} /> {c.phone}
                   </p>
-                  <button
-                    onClick={() => setEditEmergency(i)}
-                    className="text-xs text-blue-600 mt-2"
-                  >
+                  <button onClick={() => setEditEmergency(i)} className="text-xs text-blue-600 mt-2">
                     Edit
                   </button>
                 </div>
               ))
             ) : (
-              <EmptyHint
-                icon={HeartPulse}
-                text="No emergency contacts added yet."
-              />
+              <EmptyHint icon={HeartPulse} text="No emergency contacts added yet." />
             )}
           </SectionCard>
 
-          {/* ID PROOFS */}
           <SectionCard
             title="ID Proofs"
             action={
-              <button
-                onClick={() => setAddId(true)}
-                className="text-blue-600 text-sm"
-              >
+              <button onClick={() => setAddId(true)} className="text-blue-600 text-sm">
                 Upload
               </button>
             }
           >
             {idProofs?.length ? (
               idProofs.map((d, i) => (
-                <div
-                  key={i}
-                  className="flex items-start justify-between gap-3 rounded-xl border p-3"
-                >
+                <div key={i} className="flex items-start justify-between gap-3 rounded-xl border p-3">
                   <div>
                     <p className="font-medium">{d.type}</p>
                     <p className="text-xs text-slate-600">{d.number}</p>
                   </div>
                   <div className="text-right">
-                    <Badge
-                      tone={d.status === "Verified" ? "success" : "warning"}
-                    >
-                      {d.status}
-                    </Badge>
-                    <button
-                      onClick={() => setEditId(i)}
-                      className="block text-xs text-blue-600 mt-2"
-                    >
+                    <Badge tone={d.status === "Verified" ? "success" : "warning"}>{d.status}</Badge>
+                    <button onClick={() => setEditId(i)} className="block text-xs text-blue-600 mt-2">
                       Edit
                     </button>
                   </div>
@@ -510,55 +512,18 @@ export default function AdminProfile() {
             )}
           </SectionCard>
 
-          {/* QUICK CONTACT */}
           <SectionCard title="Quick Contact">
             <div className="space-y-3 pt-2">
-              <QuickRow
-                icon={Mail}
-                label="Personal Email"
-                value={personal?.personalEmail || personal?.email}
-              />
-              <QuickRow
-                icon={Mail}
-                label="Official Email"
-                value={personal?.officialEmail}
-              />
-              <QuickRow
-                icon={Phone}
-                label="Mobile"
-                value={personal?.mobileNumber || personal?.phone}
-              />
-              <QuickRow
-                icon={Phone}
-                label="Alternate"
-                value={personal?.alternateContactNumber}
-              />
-              <QuickRow
-                icon={Home}
-                label="Current Address"
-                value={personal?.currentAddress || personal?.address}
-              />
-              <QuickRow
-                icon={MapPin}
-                label="Work Location"
-                value={job?.location}
-              />
-              <QuickRow
-                icon={Briefcase}
-                label="Employee Type"
-                value={job?.employeeType}
-              />
-              <QuickRow
-                icon={IdCard}
-                label="Reporting Manager"
-                value={job?.manager}
-              />
+              <QuickRow icon={Mail} label="Personal Email" value={personal?.personalEmail || personal?.email} />
+              <QuickRow icon={Mail} label="Official Email" value={personal?.officialEmail} />
+              <QuickRow icon={Phone} label="Mobile" value={personal?.mobileNumber || personal?.phone} />
+              <QuickRow icon={Phone} label="Alternate" value={personal?.alternateContactNumber} />
+              <QuickRow icon={Home} label="Current Address" value={personal?.currentAddress || personal?.address} />
+              <QuickRow icon={MapPin} label="Work Location" value={job?.location} />
             </div>
           </SectionCard>
         </div>
       </div>
-
-      <Divider label="End of Profile" />
 
       <DocumentManager
         title="My Documents"
@@ -566,13 +531,10 @@ export default function AdminProfile() {
         accent="blue"
       />
 
-      {/* MODALS */}
+      <Divider label="End of Profile" />
+
       {editProfile && (
-        <EditProfileModal
-          profile={profile}
-          setProfile={setProfile}
-          onClose={() => setEditProfile(false)}
-        />
+        <EditProfileModal profile={profile} setProfile={setProfile} onClose={() => setEditProfile(false)} />
       )}
 
       {(addEmergency || editEmergency !== null) && (
@@ -642,9 +604,7 @@ function SectionCard({ title, subtitle, action, children }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-bold text-slate-900">{title}</p>
-          {subtitle ? (
-            <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
-          ) : null}
+          {subtitle ? <p className="text-xs text-slate-500 mt-1">{subtitle}</p> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
@@ -657,9 +617,7 @@ function Detail({ label, value, full }) {
   return (
     <div className={full ? "md:col-span-2" : ""}>
       <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-base font-semibold text-slate-900">
-        {value || "-"}
-      </p>
+      <p className="mt-1 text-base font-semibold text-slate-900">{value || "-"}</p>
     </div>
   );
 }
@@ -672,9 +630,7 @@ function QuickRow({ icon: Icon, label, value }) {
       </div>
       <div className="min-w-0">
         <p className="text-xs text-slate-500">{label}</p>
-        <p className="text-sm font-semibold text-slate-900 truncate">
-          {value || "-"}
-        </p>
+        <p className="text-sm font-semibold text-slate-900 truncate">{value || "-"}</p>
       </div>
     </div>
   );
@@ -722,12 +678,7 @@ function EditProfileModal({ profile, setProfile, onClose }) {
         className="w-full rounded-xl border p-2"
         placeholder="DOB"
         value={f.personal?.dob || ""}
-        onChange={(e) =>
-          setF({
-            ...f,
-            personal: { ...(f.personal || {}), dob: e.target.value },
-          })
-        }
+        onChange={(e) => setF({ ...f, personal: { ...(f.personal || {}), dob: e.target.value } })}
       />
 
       <input
@@ -737,11 +688,7 @@ function EditProfileModal({ profile, setProfile, onClose }) {
         onChange={(e) =>
           setF({
             ...f,
-            personal: {
-              ...(f.personal || {}),
-              officialEmail: e.target.value,
-              email: e.target.value,
-            },
+            personal: { ...(f.personal || {}), officialEmail: e.target.value, email: e.target.value },
           })
         }
       />
@@ -753,11 +700,7 @@ function EditProfileModal({ profile, setProfile, onClose }) {
         onChange={(e) =>
           setF({
             ...f,
-            personal: {
-              ...(f.personal || {}),
-              mobileNumber: e.target.value,
-              phone: e.target.value,
-            },
+            personal: { ...(f.personal || {}), mobileNumber: e.target.value, phone: e.target.value },
           })
         }
       />
@@ -769,11 +712,7 @@ function EditProfileModal({ profile, setProfile, onClose }) {
         onChange={(e) =>
           setF({
             ...f,
-            personal: {
-              ...(f.personal || {}),
-              currentAddress: e.target.value,
-              address: e.target.value,
-            },
+            personal: { ...(f.personal || {}), currentAddress: e.target.value, address: e.target.value },
           })
         }
       />
@@ -792,11 +731,7 @@ function EditProfileModal({ profile, setProfile, onClose }) {
 }
 
 function EmergencyModal({ profile, setProfile, index, onClose }) {
-  const data =
-    index !== null
-      ? profile.emergencyContacts[index]
-      : { name: "", relation: "", phone: "" };
-
+  const data = index !== null ? profile.emergencyContacts[index] : { name: "", relation: "", phone: "" };
   const [f, setF] = useState(data);
 
   return (
@@ -827,11 +762,7 @@ function EmergencyModal({ profile, setProfile, index, onClose }) {
 }
 
 function IdModal({ profile, setProfile, index, onClose }) {
-  const data =
-    index !== null
-      ? profile.idProofs[index]
-      : { type: "", number: "", status: "Pending" };
-
+  const data = index !== null ? profile.idProofs[index] : { type: "", number: "", status: "Pending" };
   const [f, setF] = useState(data);
 
   return (

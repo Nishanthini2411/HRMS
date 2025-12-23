@@ -145,10 +145,7 @@ async function uploadAvatar({ userId, file }) {
   const cleanName = (file.name || "avatar").replace(/\s+/g, "-");
   const path = `profiles/${userId}/${Date.now()}-${cleanName}`;
 
-  const { error: upErr } = await supabase.storage
-    .from("avatars")
-    .upload(path, file, { upsert: true });
-
+  const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
   if (upErr) throw upErr;
 
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);
@@ -182,9 +179,6 @@ export default function EmployeeSignIn() {
     if (role) localStorage.setItem("hrmss.lastRole", role);
   }, [role]);
 
-  // ✅ IMPORTANT FIX:
-  // - If you used supabase.auth login -> session exists -> user.id available
-  // - If you used RPC verify_login -> NO auth session -> fallback to HRMSS_AUTH_SESSION
   useEffect(() => {
     let mounted = true;
 
@@ -198,12 +192,8 @@ export default function EmployeeSignIn() {
         const { data: sessionData } = await supabase.auth.getSession();
         const user = sessionData?.session?.user || null;
 
-        // --- derive identity for DB row ---
-        // When auth user exists => userId = auth user.id
-        // When no auth user => userId fallback to authCache.id (your verify_login return should include id)
         const userId = user?.id || authCache?.id || null;
 
-        // derive email
         const userEmail =
           user?.email ||
           authCache?.email ||
@@ -212,12 +202,10 @@ export default function EmployeeSignIn() {
           "";
 
         if (!userId) {
-          // if you want to allow SignIn without any session, comment this and allow empty
           navigate("/login", { replace: true, state: { redirectTo: "/sign-in", role } });
           return;
         }
 
-        // ✅ Load profile by user_id
         const { data: row, error: selErr } = await supabase
           .from("hrmss_profiles")
           .select("*")
@@ -227,12 +215,8 @@ export default function EmployeeSignIn() {
         if (selErr) throw selErr;
         if (!mounted) return;
 
-        if (row) {
-          setForm(mapDbToForm(row, empIdFromLogin, userEmail));
-        } else {
-          // new user -> prefill email and empId (if employee)
-          setForm(emptyForm(empIdFromLogin, userEmail));
-        }
+        if (row) setForm(mapDbToForm(row, empIdFromLogin, userEmail));
+        else setForm(emptyForm(empIdFromLogin, userEmail));
       } catch (e) {
         console.error(e);
         if (mounted) setError(e?.message || "Failed to load profile");
@@ -259,10 +243,7 @@ export default function EmployeeSignIn() {
   const addEducation = () => {
     setForm((p) => ({
       ...p,
-      education: [
-        ...p.education,
-        { qualification: "", institution: "", yearOfPassing: "", specialization: "" },
-      ],
+      education: [...p.education, { qualification: "", institution: "", yearOfPassing: "", specialization: "" }],
     }));
   };
 
@@ -284,10 +265,7 @@ export default function EmployeeSignIn() {
   const addExperience = () => {
     setForm((p) => ({
       ...p,
-      experience: [
-        ...p.experience,
-        { organization: "", designation: "", duration: "", reasonForLeaving: "" },
-      ],
+      experience: [...p.experience, { organization: "", designation: "", duration: "", reasonForLeaving: "" }],
     }));
   };
 
@@ -438,10 +416,7 @@ export default function EmployeeSignIn() {
         avatar_url: avatar_url || null,
       };
 
-      const { error: upErr } = await supabase
-        .from("hrmss_profiles")
-        .upsert(payload, { onConflict: "user_id" });
-
+      const { error: upErr } = await supabase.from("hrmss_profiles").upsert(payload, { onConflict: "user_id" });
       if (upErr) throw upErr;
 
       if (avatar_url && String(form.avatar).startsWith("blob:")) {
@@ -453,6 +428,10 @@ export default function EmployeeSignIn() {
       }
 
       localStorage.setItem(COMPLETION_KEY(role), "true");
+
+      // ✅ This is the important part:
+      // From Login "Sign In" button we pass redirectTo="/login"
+      // so after save it comes back to Login page.
       navigate(redirectTo, { replace: true });
     } catch (e) {
       console.error(e);
@@ -510,7 +489,9 @@ export default function EmployeeSignIn() {
               type="button"
               onClick={() => {
                 if (form.avatar && String(form.avatar).startsWith("blob:")) {
-                  try { URL.revokeObjectURL(form.avatar); } catch {}
+                  try {
+                    URL.revokeObjectURL(form.avatar);
+                  } catch {}
                 }
                 setAvatarFile(null);
                 setAvatarRemoved(false);
@@ -535,7 +516,6 @@ export default function EmployeeSignIn() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* LEFT: FORM */}
           <div className="lg:col-span-2 space-y-6">
-            {/* HEADER CARD */}
             <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
               <div className="px-6 py-5 border-b bg-gradient-to-r from-purple-700 to-indigo-600 text-white">
                 <div className="flex items-center justify-between gap-4">
@@ -554,7 +534,6 @@ export default function EmployeeSignIn() {
                   </div>
                 </div>
 
-                {/* PROGRESS */}
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-xs text-white/80">
                     <span>Profile Completion</span>
@@ -566,7 +545,6 @@ export default function EmployeeSignIn() {
                 </div>
               </div>
 
-              {/* CONTENT */}
               <div className="p-6 md:p-8 space-y-8">
                 <SectionHeader icon={User} title="Personal Information" subtitle="Basic personal details" />
 
@@ -610,7 +588,7 @@ export default function EmployeeSignIn() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input icon={CalendarDays} label="DATE OF BIRTH (DD/MM/YYYY)" value={form.dob} onChange={(v) => onChange("dob", v)} placeholder="DD/MM/YYYY" />
+                  <Input icon={CalendarDays} label="DATE OF BIRTH" type="date" value={form.dob} onChange={(v) => onChange("dob", v)} />
                   <Select icon={User} label="GENDER" value={form.gender} onChange={(v) => onChange("gender", v)} options={["Male", "Female", "Other"]} placeholder="Select Gender" />
                   <Select icon={HeartPulse} label="MARITAL STATUS" value={form.maritalStatus} onChange={(v) => onChange("maritalStatus", v)} options={["Single", "Married", "Other"]} placeholder="Select Status" />
                   <Select icon={HeartPulse} label="BLOOD GROUP" value={form.bloodGroup} onChange={(v) => onChange("bloodGroup", v)} options={["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"]} placeholder="Select Blood Group" />
@@ -818,8 +796,6 @@ export default function EmployeeSignIn() {
                 </div>
               </div>
             </div>
-
-           
           </div>
         </div>
 
@@ -863,14 +839,18 @@ function Divider() {
   return <div className="h-px w-full bg-slate-200" />;
 }
 
-function Input({ icon: Icon, label, value, onChange, placeholder }) {
+function Input({ icon: Icon, label, value, onChange, placeholder, type = "text" }) {
   return (
     <div className="space-y-1.5">
       <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
       <div className="group flex items-center gap-2 rounded-2xl border bg-white px-3 py-2.5 shadow-sm focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-300 transition">
-        {Icon ? <Icon size={16} className="text-slate-400 group-focus-within:text-purple-700 transition" /> : null}
+        {Icon ? (
+          <Icon size={16} className="text-slate-400 group-focus-within:text-purple-700 transition" />
+        ) : null}
+
         <input
-          className="w-full outline-none text-sm text-slate-900 placeholder:text-slate-400"
+          type={type}
+          className="w-full outline-none text-sm text-slate-900 placeholder:text-slate-400 bg-transparent"
           value={value || ""}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}

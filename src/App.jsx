@@ -41,6 +41,7 @@ import ManagerApprovals from "./pages/manager/ManagerApprovals.jsx";
 import ManagerTeam from "./pages/manager/ManagerTeam.jsx";
 import ManagerPayroll from "./pages/manager/ManagerPayroll.jsx";
 import ManagerNotifications from "./pages/manager/ManagerNotifications.jsx";
+
 import ManagerApproverLayout from "./pages/managerApprover/ManagerApproverLayout.jsx";
 import ManagerApproverDashboard from "./pages/managerApprover/ManagerApproverDashboard.jsx";
 import ManagerApproverApprovals from "./pages/managerApprover/ManagerApproverApprovals.jsx";
@@ -56,7 +57,7 @@ import EmployeeLeaveManagement from "./pages/employee/EmployeeLeaveManagement.js
 import MyProfile from "./pages/employee/profile/MyProfile.jsx";
 import EmployeePayslips from "./pages/employee/EmployeePayslips.jsx";
 
-/* ✅ NEW: EMPLOYEE SIGN IN (details fill page) */
+/* ✅ Sign In page (details fill page) */
 import EmployeeSignIn from "./pages/employee/EmployeeSignIn.jsx";
 
 /* EMPLOYEE MENU PAGES */
@@ -65,18 +66,26 @@ import { SupportPage } from "./pages/employee/EmployeeMenuPages.jsx";
 /* REAL EMPLOYEE PAGES */
 import EmployeeNotifications from "./pages/employee/pages/EmployeeNotifications.jsx";
 import EmployeeSettings from "./pages/employee/pages/EmployeeSettings.jsx";
+
 import PeopleDirectory from "./pages/PeopleDirectory.jsx";
 
 export default function App() {
   return (
     <Routes>
+      {/* default */}
       <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/people" element={<PeopleDirectory />} />
 
-      {/* ✅ NEW ROUTE: Sign In (fill personal details) */}
+      {/* auth */}
+      <Route path="/login" element={<Login />} />
+
+      {/* ✅ Sign In route (your Login Sign In button uses this) */}
       <Route path="/sign-in" element={<EmployeeSignIn />} />
+
+      {/* optional alias (ok to keep) */}
       <Route path="/employee-signin" element={<EmployeeSignIn />} />
+
+      {/* common */}
+      <Route path="/people" element={<PeopleDirectory />} />
 
       {/* ================= HR ================= */}
       <Route path="/hr-dashboard" element={<HrLayout />}>
@@ -146,6 +155,7 @@ export default function App() {
         <Route path="people" element={<PeopleDirectory />} />
       </Route>
 
+      {/* fallback */}
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
