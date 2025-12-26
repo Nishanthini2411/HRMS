@@ -11,108 +11,303 @@ import {
   GraduationCap,
   Building2,
   HeartPulse,
-  Home,
 } from "lucide-react";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import DocumentManager from "../../components/DocumentManager.jsx";
+
+/* ========================================================= */
+/* ======================= HELPERS ========================= */
+/* ========================================================= */
+
+const AUTH_KEY = "HRMSS_AUTH_SESSION";
+const HR_CACHE_KEY = (userId) => `hrmss.profile.cache.hr.${userId || "unknown"}`;
+
+function safeJsonParse(raw) {
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readAuth() {
+  const s = safeJsonParse(localStorage.getItem(AUTH_KEY)) || {};
+  const userId = String(s.user_id || s.id || s.userId || "").trim();
+  const email = String(s.email || s.identifier || "").trim();
+  const fullName = String(s.full_name || s.fullName || s.name || "").trim();
+  return { userId, email, fullName };
+}
+
+function mapDbToProfile(data, fallback = {}) {
+  if (!data) return null;
+
+  return {
+    name: data.full_name || fallback.fullName || "",
+    id: data.employee_id || fallback.userId || "",
+    avatar: data.avatar_url || "",
+
+    personal: {
+      dob: data.dob || "",
+      gender: data.gender || "",
+      maritalStatus: data.marital_status || "",
+      bloodGroup: data.blood_group || "",
+      personalEmail: data.personal_email || data.email || fallback.email || "",
+      officialEmail: data.official_email || "",
+      mobileNumber: data.mobile_number || data.phone || "",
+      alternateContactNumber: data.alternate_contact_number || "",
+      currentAddress: data.current_address || "",
+      permanentAddress: data.permanent_address || "",
+    },
+
+    job: {
+      employeeId: data.employee_id || fallback.userId || "",
+      title: data.designation || "HR",
+      department: data.department || "Human Resources",
+      location: data.location || "",
+      workMode: data.work_mode || "Office",
+    },
+
+    education: Array.isArray(data.education) ? data.education : [],
+    experience: Array.isArray(data.experience) ? data.experience : [],
+
+    skills: {
+      primarySkills: data.primary_skills || "",
+      secondarySkills: data.secondary_skills || "",
+      toolsTechnologies: data.tools_technologies || "",
+    },
+
+    bank: {
+      accountHolderName: data.account_holder_name || "",
+      bankName: data.bank_name || "",
+      accountNumber: data.account_number || "",
+      ifscCode: data.ifsc_code || "",
+      branch: data.branch || "",
+    },
+
+    emergencyContacts: data.emergency_name
+      ? [
+          {
+            name: data.emergency_name || "",
+            relation: data.emergency_relationship || "",
+            phone: data.emergency_contact_number || "",
+          },
+        ]
+      : [],
+
+    idProofs: [],
+
+    // keep uid for save
+    __userId: String(data.user_id || fallback.userId || "").trim(),
+  };
+}
+
+function profileToDbPayload(profile, userId, fallback = {}) {
+  const p = profile || {};
+  const personal = p.personal || {};
+  const job = p.job || {};
+  const skills = p.skills || {};
+  const bank = p.bank || {};
+  const e0 =
+    Array.isArray(p.emergencyContacts) && p.emergencyContacts.length
+      ? p.emergencyContacts[0]
+      : null;
+
+  return {
+    user_id: userId,
+    // if your table has role column you can keep this,
+    // if not existing, remove the next line.
+    role: "hr",
+
+    full_name: p.name || fallback.fullName || null,
+    email: personal.personalEmail || fallback.email || null,
+    phone: personal.mobileNumber || null,
+
+    employee_id: p.id || job.employeeId || userId || null,
+    avatar_url: p.avatar || null,
+
+    dob: personal.dob || null,
+    gender: personal.gender || null,
+    marital_status: personal.maritalStatus || null,
+    blood_group: personal.bloodGroup || null,
+
+    personal_email: personal.personalEmail || null,
+    official_email: personal.officialEmail || null,
+    mobile_number: personal.mobileNumber || null,
+    alternate_contact_number: personal.alternateContactNumber || null,
+
+    current_address: personal.currentAddress || null,
+    permanent_address: personal.permanentAddress || null,
+
+    location: job.location || null,
+    department: job.department || null,
+    designation: job.title || null,
+    work_mode: job.workMode || null,
+
+    education: Array.isArray(p.education) ? p.education : [],
+    experience: Array.isArray(p.experience) ? p.experience : [],
+
+    primary_skills: skills.primarySkills || null,
+    secondary_skills: skills.secondarySkills || null,
+    tools_technologies: skills.toolsTechnologies || null,
+
+    account_holder_name: bank.accountHolderName || null,
+    bank_name: bank.bankName || null,
+    account_number: bank.accountNumber || null,
+    ifsc_code: bank.ifscCode || null,
+    branch: bank.branch || null,
+
+    emergency_name: e0?.name || null,
+    emergency_relationship: e0?.relation || null,
+    emergency_contact_number: e0?.phone || null,
+
+    profile_completed: true,
+    updated_at: new Date().toISOString(),
+  };
+}
 
 /* ========================================================= */
 /* ======================= MAIN ============================ */
 /* ========================================================= */
 
 export default function HrProfile() {
+  const auth = readAuth();
+  const cacheKey = HR_CACHE_KEY(auth.userId);
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
   const [editProfile, setEditProfile] = useState(false);
-  const [addEmergency, setAddEmergency] = useState(false);
-  const [editEmergency, setEditEmergency] = useState(null);
-  const [addId, setAddId] = useState(false);
-  const [editId, setEditId] = useState(null);
 
   /* ================= FETCH HR PROFILE ================= */
   useEffect(() => {
+    let mounted = true;
+
     async function loadProfile() {
       try {
-        const session = JSON.parse(
-          localStorage.getItem("HRMSS_AUTH_SESSION")
-        );
+        setErr("");
+        setLoading(true);
 
-        const userId = session?.id;
-        if (!userId) return;
+        const { userId } = auth;
+        if (!userId) {
+          setErr("HR session not found. Please login again.");
+          setProfile(null);
+          return;
+        }
+
+        // ✅ 1) cache first (Sign-In page save pannina details)
+        const cached = safeJsonParse(localStorage.getItem(cacheKey));
+        if (cached && mounted) {
+          setProfile(cached);
+        }
+
+        // ✅ 2) DB load
+        if (!isSupabaseConfigured) {
+          if (!cached) setErr("Supabase env missing. Showing cached/local data only.");
+          if (!cached && mounted) setProfile(null);
+          return;
+        }
 
         const { data, error } = await supabase
           .from("hrmss_profiles")
           .select("*")
           .eq("user_id", userId)
-          .single();
+          .maybeSingle(); // ✅ no row -> data=null, error=null
 
         if (error) throw error;
 
-        setProfile({
-          name: data.full_name,
-          id: data.employee_id,
-          avatar: data.avatar_url,
+        // ✅ row exists
+        if (data) {
+          const mapped = mapDbToProfile(data, auth);
+          localStorage.setItem(cacheKey, JSON.stringify(mapped));
+          if (mounted) setProfile(mapped);
+          return;
+        }
 
+        // ✅ 3) row NOT exists -> auto create (so "HR Profile not found" never shows)
+        const minimal = {
+          name: auth.fullName || "HR",
+          id: userId,
+          avatar: "",
           personal: {
-            dob: data.dob,
-            gender: data.gender,
-            maritalStatus: data.marital_status,
-            bloodGroup: data.blood_group,
-            personalEmail: data.personal_email,
-            officialEmail: data.official_email,
-            mobileNumber: data.mobile_number,
-            alternateContactNumber: data.alternate_contact_number,
-            currentAddress: data.current_address,
-            permanentAddress: data.permanent_address,
+            dob: "",
+            gender: "",
+            maritalStatus: "",
+            bloodGroup: "",
+            personalEmail: auth.email || "",
+            officialEmail: "",
+            mobileNumber: "",
+            alternateContactNumber: "",
+            currentAddress: "",
+            permanentAddress: "",
           },
-
           job: {
-            employeeId: data.employee_id,
+            employeeId: userId,
             title: "HR",
             department: "Human Resources",
-            location: data.location,
+            location: "",
             workMode: "Office",
           },
-
-          education: Array.isArray(data.education) ? data.education : [],
-          experience: Array.isArray(data.experience) ? data.experience : [],
-
-          skills: {
-            primarySkills: data.primary_skills,
-            secondarySkills: data.secondary_skills,
-            toolsTechnologies: data.tools_technologies,
-          },
-
-          bank: {
-            accountHolderName: data.account_holder_name,
-            bankName: data.bank_name,
-            accountNumber: data.account_number,
-            ifscCode: data.ifsc_code,
-            branch: data.branch,
-          },
-
-          emergencyContacts: data.emergency_name
-            ? [
-                {
-                  name: data.emergency_name,
-                  relation: data.emergency_relationship,
-                  phone: data.emergency_contact_number,
-                },
-              ]
-            : [],
-
+          education: [],
+          experience: [],
+          skills: { primarySkills: "", secondarySkills: "", toolsTechnologies: "" },
+          bank: { accountHolderName: "", bankName: "", accountNumber: "", ifscCode: "", branch: "" },
+          emergencyContacts: [],
           idProofs: [],
-        });
+          __userId: userId,
+        };
+
+        const payload = profileToDbPayload(minimal, userId, auth);
+
+        // ⚠️ if your table doesn't have role column, remove role from payload above
+        const { error: upErr } = await supabase
+          .from("hrmss_profiles")
+          .upsert(payload, { onConflict: "user_id" });
+
+        if (upErr) throw upErr;
+
+        localStorage.setItem(cacheKey, JSON.stringify(minimal));
+        if (mounted) setProfile(minimal);
       } catch (e) {
         console.error("HR profile load error:", e);
+        if (mounted) setErr(e?.message || "Failed to load HR profile");
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
 
     loadProfile();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ================= SAVE (cache + DB) ================= */
+  const persistProfile = async (next) => {
+    setProfile(next);
+    localStorage.setItem(cacheKey, JSON.stringify(next));
+
+    if (!isSupabaseConfigured) return;
+
+    try {
+      const userId = auth.userId;
+      if (!userId) return;
+
+      const payload = profileToDbPayload(next, userId, auth);
+
+      const { error } = await supabase
+        .from("hrmss_profiles")
+        .upsert(payload, { onConflict: "user_id" });
+
+      if (error) throw error;
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to save profile");
+    }
+  };
+
+  /* ================= UI STATES ================= */
 
   if (loading) {
     return (
@@ -141,17 +336,23 @@ export default function HrProfile() {
     bank,
     emergencyContacts,
     avatar,
-    idProofs,
   } = profile;
 
   const changeAvatar = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setProfile({ ...profile, avatar: URL.createObjectURL(file) });
+    const url = URL.createObjectURL(file);
+    persistProfile({ ...profile, avatar: url });
   };
 
   return (
     <div className="space-y-6">
+      {err ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {err}
+        </div>
+      ) : null}
+
       {/* HEADER */}
       <div className="flex justify-between items-start">
         <div>
@@ -188,20 +389,26 @@ export default function HrProfile() {
           )}
           <label className="absolute bottom-1 right-1 bg-white p-1 rounded-full shadow cursor-pointer">
             <Camera size={16} />
-            <input hidden type="file" onChange={changeAvatar} />
+            <input hidden type="file" accept="image/*" onChange={changeAvatar} />
           </label>
         </div>
 
         <div className="flex-1">
-          <h2 className="text-xl font-semibold text-slate-900">{name}</h2>
+          <h2 className="text-xl font-semibold text-slate-900">{name || "-"}</h2>
           <p className="text-sm text-slate-500">
-            {job.title} – {job.department}
+            {job?.title || "HR"} – {job?.department || "Human Resources"}
           </p>
 
           <div className="flex gap-2 mt-3 flex-wrap">
-            <Badge><IdCard size={14} /> {id || "-"}</Badge>
-            <Badge><MapPin size={14} /> {job.location || "-"}</Badge>
-            <Badge><Briefcase size={14} /> {job.workMode}</Badge>
+            <Badge>
+              <IdCard size={14} /> {id || "-"}
+            </Badge>
+            <Badge>
+              <MapPin size={14} /> {job?.location || "-"}
+            </Badge>
+            <Badge>
+              <Briefcase size={14} /> {job?.workMode || "-"}
+            </Badge>
           </div>
         </div>
       </div>
@@ -213,72 +420,111 @@ export default function HrProfile() {
           <SectionCard title="Personal Details">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
               <Detail label="FULL NAME" value={name} />
-              <Detail label="DOB" value={personal.dob} />
-              <Detail label="GENDER" value={personal.gender} />
-              <Detail label="MARITAL STATUS" value={personal.maritalStatus} />
-              <Detail label="BLOOD GROUP" value={personal.bloodGroup} />
-              <Detail label="PERSONAL EMAIL" value={personal.personalEmail} />
-              <Detail label="OFFICIAL EMAIL" value={personal.officialEmail} />
-              <Detail label="MOBILE NUMBER" value={personal.mobileNumber} />
-              <Detail label="ALTERNATE NUMBER" value={personal.alternateContactNumber} />
-              <Detail label="CURRENT ADDRESS" value={personal.currentAddress} full />
-              <Detail label="PERMANENT ADDRESS" value={personal.permanentAddress} full />
+              <Detail label="DOB" value={personal?.dob} />
+              <Detail label="GENDER" value={personal?.gender} />
+              <Detail label="MARITAL STATUS" value={personal?.maritalStatus} />
+              <Detail label="BLOOD GROUP" value={personal?.bloodGroup} />
+              <Detail label="PERSONAL EMAIL" value={personal?.personalEmail} />
+              <Detail label="OFFICIAL EMAIL" value={personal?.officialEmail} />
+              <Detail label="MOBILE NUMBER" value={personal?.mobileNumber} />
+              <Detail
+                label="ALTERNATE NUMBER"
+                value={personal?.alternateContactNumber}
+              />
+              <Detail
+                label="CURRENT ADDRESS"
+                value={personal?.currentAddress}
+                full
+              />
+              <Detail
+                label="PERMANENT ADDRESS"
+                value={personal?.permanentAddress}
+                full
+              />
             </div>
           </SectionCard>
 
           <SectionCard title="Educational Qualifications">
             <div className="pt-4 space-y-3">
-              {education.length ? education.map((e, i) => (
-                <CardBlock key={i} title={`Qualification #${i + 1}`} icon={GraduationCap}>
-                  <Detail label="QUALIFICATION" value={e.qualification} />
-                  <Detail label="INSTITUTION" value={e.institution} />
-                  <Detail label="YEAR" value={e.yearOfPassing} />
-                  <Detail label="SPECIALIZATION" value={e.specialization} />
-                </CardBlock>
-              )) : <EmptyHint icon={GraduationCap} text="No education details" />}
+              {education?.length ? (
+                education.map((e, i) => (
+                  <CardBlock
+                    key={i}
+                    title={`Qualification #${i + 1}`}
+                    icon={GraduationCap}
+                  >
+                    <Detail label="QUALIFICATION" value={e.qualification} />
+                    <Detail label="INSTITUTION" value={e.institution} />
+                    <Detail label="YEAR" value={e.yearOfPassing} />
+                    <Detail label="SPECIALIZATION" value={e.specialization} />
+                  </CardBlock>
+                ))
+              ) : (
+                <EmptyHint icon={GraduationCap} text="No education details" />
+              )}
             </div>
           </SectionCard>
 
           <SectionCard title="Professional Experience">
             <div className="pt-4 space-y-3">
-              {experience.length ? experience.map((e, i) => (
-                <CardBlock key={i} title={`Experience #${i + 1}`} icon={Building2}>
-                  <Detail label="ORGANIZATION" value={e.organization} />
-                  <Detail label="DESIGNATION" value={e.designation} />
-                  <Detail label="DURATION" value={e.duration} />
-                  <Detail label="REASON" value={e.reasonForLeaving} />
-                </CardBlock>
-              )) : <EmptyHint icon={Briefcase} text="No experience details" />}
+              {experience?.length ? (
+                experience.map((e, i) => (
+                  <CardBlock
+                    key={i}
+                    title={`Experience #${i + 1}`}
+                    icon={Building2}
+                  >
+                    <Detail label="ORGANIZATION" value={e.organization} />
+                    <Detail label="DESIGNATION" value={e.designation} />
+                    <Detail label="DURATION" value={e.duration} />
+                    <Detail label="REASON" value={e.reasonForLeaving} />
+                  </CardBlock>
+                ))
+              ) : (
+                <EmptyHint icon={Briefcase} text="No experience details" />
+              )}
             </div>
           </SectionCard>
 
           <SectionCard title="Skills & Expertise">
-            <Detail label="PRIMARY SKILLS" value={skills.primarySkills} />
-            <Detail label="SECONDARY SKILLS" value={skills.secondarySkills} />
-            <Detail label="TOOLS / TECHNOLOGIES" value={skills.toolsTechnologies} full />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+              <Detail label="PRIMARY SKILLS" value={skills?.primarySkills} />
+              <Detail label="SECONDARY SKILLS" value={skills?.secondarySkills} />
+              <Detail
+                label="TOOLS / TECHNOLOGIES"
+                value={skills?.toolsTechnologies}
+                full
+              />
+            </div>
           </SectionCard>
 
           <SectionCard title="Bank & Payroll Details">
-            <Detail label="ACCOUNT HOLDER" value={bank.accountHolderName} />
-            <Detail label="BANK NAME" value={bank.bankName} />
-            <Detail label="ACCOUNT NUMBER" value={bank.accountNumber} />
-            <Detail label="IFSC" value={bank.ifscCode} />
-            <Detail label="BRANCH" value={bank.branch} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+              <Detail label="ACCOUNT HOLDER" value={bank?.accountHolderName} />
+              <Detail label="BANK NAME" value={bank?.bankName} />
+              <Detail label="ACCOUNT NUMBER" value={bank?.accountNumber} />
+              <Detail label="IFSC" value={bank?.ifscCode} />
+              <Detail label="BRANCH" value={bank?.branch} />
+            </div>
           </SectionCard>
         </div>
 
         {/* RIGHT */}
         <div className="space-y-6">
           <SectionCard title="Emergency Contact">
-            {emergencyContacts.length ? emergencyContacts.map((c, i) => (
-              <div key={i} className="rounded-xl border p-3">
-                <p className="font-medium">{c.name}</p>
-                <p className="text-xs">{c.relation}</p>
-                <p className="text-sm flex gap-1 items-center">
-                  <Phone size={14} /> {c.phone}
-                </p>
-              </div>
-            )) : <EmptyHint icon={HeartPulse} text="No emergency contacts" />}
+            {emergencyContacts?.length ? (
+              emergencyContacts.map((c, i) => (
+                <div key={i} className="rounded-xl border p-3">
+                  <p className="font-medium">{c.name}</p>
+                  <p className="text-xs text-slate-500">{c.relation}</p>
+                  <p className="text-sm flex gap-1 items-center">
+                    <Phone size={14} /> {c.phone}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <EmptyHint icon={HeartPulse} text="No emergency contacts" />
+            )}
           </SectionCard>
         </div>
       </div>
@@ -288,6 +534,17 @@ export default function HrProfile() {
         subtitle="Upload and manage HR documents"
         accent="purple"
       />
+
+      {editProfile && (
+        <EditProfileModal
+          profile={profile}
+          onClose={() => setEditProfile(false)}
+          onSave={async (next) => {
+            await persistProfile(next);
+            setEditProfile(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -338,5 +595,81 @@ function EmptyHint({ icon: Icon, text }) {
     <div className="flex items-center gap-2 text-slate-500 text-sm">
       <Icon size={16} /> {text}
     </div>
+  );
+}
+
+/* ===================== EDIT MODAL ===================== */
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-3">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4">
+        <div className="flex justify-between items-center gap-3">
+          <h2 className="font-semibold">{title}</h2>
+          <button onClick={onClose} className="rounded-lg border p-1 hover:bg-slate-50">
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function EditProfileModal({ profile, onSave, onClose }) {
+  const [f, setF] = useState(profile);
+
+  const setPersonal = (k, v) =>
+    setF((p) => ({ ...p, personal: { ...(p.personal || {}), [k]: v } }));
+
+  const setJob = (k, v) =>
+    setF((p) => ({ ...p, job: { ...(p.job || {}), [k]: v } }));
+
+  return (
+    <Modal title="Edit HR Profile" onClose={onClose}>
+      <input
+        className="w-full rounded-xl border p-2"
+        placeholder="Full Name"
+        value={f.name || ""}
+        onChange={(e) => setF({ ...f, name: e.target.value })}
+      />
+      <input
+        className="w-full rounded-xl border p-2"
+        placeholder="Personal Email"
+        value={f.personal?.personalEmail || ""}
+        onChange={(e) => setPersonal("personalEmail", e.target.value)}
+      />
+      <input
+        className="w-full rounded-xl border p-2"
+        placeholder="Mobile Number"
+        value={f.personal?.mobileNumber || ""}
+        onChange={(e) => setPersonal("mobileNumber", e.target.value)}
+      />
+      <input
+        className="w-full rounded-xl border p-2"
+        placeholder="Location"
+        value={f.job?.location || ""}
+        onChange={(e) => setJob("location", e.target.value)}
+      />
+      <input
+        className="w-full rounded-xl border p-2"
+        placeholder="Department"
+        value={f.job?.department || ""}
+        onChange={(e) => setJob("department", e.target.value)}
+      />
+      <input
+        className="w-full rounded-xl border p-2"
+        placeholder="Work Mode"
+        value={f.job?.workMode || ""}
+        onChange={(e) => setJob("workMode", e.target.value)}
+      />
+
+      <button
+        className="rounded-xl bg-purple-600 px-4 py-2 text-white font-semibold"
+        onClick={() => onSave(f)}
+      >
+        Save
+      </button>
+    </Modal>
   );
 }

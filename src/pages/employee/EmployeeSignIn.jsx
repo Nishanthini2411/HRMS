@@ -45,6 +45,10 @@ const ROLE_REDIRECTS = {
 const COMPLETION_KEY = (role) => `hrmss.signin.completed.${role}`;
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
 
+/* ✅ Local profile cache key (MyProfile show aaga use aagum) */
+const PROFILE_CACHE_KEY = (role, key) =>
+  `hrmss.profile.cache.${role}.${key || "unknown"}`;
+
 /* ===================== HELPERS ===================== */
 
 const emptyForm = (empIdFromLogin = "", userEmail = "") => ({
@@ -63,8 +67,12 @@ const emptyForm = (empIdFromLogin = "", userEmail = "") => ({
   currentAddress: "",
   permanentAddress: "",
 
-  education: [{ qualification: "", institution: "", yearOfPassing: "", specialization: "" }],
-  experience: [{ organization: "", designation: "", duration: "", reasonForLeaving: "" }],
+  education: [
+    { qualification: "", institution: "", yearOfPassing: "", specialization: "" },
+  ],
+  experience: [
+    { organization: "", designation: "", duration: "", reasonForLeaving: "" },
+  ],
 
   primarySkills: "",
   secondarySkills: "",
@@ -104,8 +112,14 @@ function mapDbToForm(row, empIdFromLogin = "", userEmail = "") {
     currentAddress: row.current_address ?? "",
     permanentAddress: row.permanent_address ?? "",
 
-    education: Array.isArray(row.education) && row.education.length ? row.education : form.education,
-    experience: Array.isArray(row.experience) && row.experience.length ? row.experience : form.experience,
+    education:
+      Array.isArray(row.education) && row.education.length
+        ? row.education
+        : form.education,
+    experience:
+      Array.isArray(row.experience) && row.experience.length
+        ? row.experience
+        : form.experience,
 
     primarySkills: row.primary_skills ?? "",
     secondarySkills: row.secondary_skills ?? "",
@@ -126,12 +140,6 @@ function mapDbToForm(row, empIdFromLogin = "", userEmail = "") {
   };
 }
 
-function computeProfileKey({ role, form, userEmail }) {
-  if (role === "employee") return (form.employeeId || "").trim();
-  if (role === "hr" || role === "manager") return (form.officialEmail || userEmail || "").trim();
-  return (form.employeeId || form.officialEmail || userEmail || "").trim(); // admin fallback
-}
-
 function readAuthSession() {
   try {
     const raw = localStorage.getItem(AUTH_KEY);
@@ -141,11 +149,24 @@ function readAuthSession() {
   }
 }
 
-async function uploadAvatar({ userId, file }) {
-  const cleanName = (file.name || "avatar").replace(/\s+/g, "-");
-  const path = `profiles/${userId}/${Date.now()}-${cleanName}`;
+/* ✅ optional: read cached profile (fallback) */
+function readCachedProfile(role, key) {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY(role, key));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
-  const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+// ✅ employee uses employeeId as "folder"
+async function uploadAvatar({ folderKey, file }) {
+  const cleanName = (file.name || "avatar").replace(/\s+/g, "-");
+  const path = `profiles/${folderKey}/${Date.now()}-${cleanName}`;
+
+  const { error: upErr } = await supabase.storage
+    .from("avatars")
+    .upload(path, file, { upsert: true });
   if (upErr) throw upErr;
 
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);
@@ -163,7 +184,8 @@ export default function EmployeeSignIn() {
   const role = roleFromState || roleFromStorage || "employee";
 
   const roleLabel = ROLE_LABELS[role] || "User";
-  const redirectTo = location.state?.redirectTo || ROLE_REDIRECTS[role] || "/login";
+  const redirectTo =
+    location.state?.redirectTo || ROLE_REDIRECTS[role] || "/login";
   const empIdFromLogin = location.state?.empId || "";
 
   const [error, setError] = useState("");
@@ -189,6 +211,39 @@ export default function EmployeeSignIn() {
 
         const authCache = readAuthSession();
 
+        // ✅ Employee role: no supabase auth needed
+        if (role === "employee") {
+          const empId = String(
+            empIdFromLogin || authCache?.employee_id || authCache?.identifier || ""
+          ).trim();
+
+          if (!empId) {
+            navigate("/login", { replace: true });
+            return;
+          }
+
+          const { data: row, error: selErr } = await supabase
+            .from("hrmss_employee_profiles")
+            .select("*")
+            .eq("employee_id", empId)
+            .maybeSingle();
+
+          if (selErr) throw selErr;
+          if (!mounted) return;
+
+          if (row) setForm(mapDbToForm(row, empId, ""));
+          else {
+            // ✅ fallback: cached -> else empty
+            const cached = readCachedProfile("employee", empId);
+            if (cached)
+              setForm({ ...emptyForm(empId, ""), ...cached, employeeId: empId });
+            else setForm(emptyForm(empId, ""));
+          }
+
+          return;
+        }
+
+        // ✅ Other roles (hr/admin/manager) - existing logic (supabase auth)
         const { data: sessionData } = await supabase.auth.getSession();
         const user = sessionData?.session?.user || null;
 
@@ -216,7 +271,12 @@ export default function EmployeeSignIn() {
         if (!mounted) return;
 
         if (row) setForm(mapDbToForm(row, empIdFromLogin, userEmail));
-        else setForm(emptyForm(empIdFromLogin, userEmail));
+        else {
+          // ✅ fallback: cached -> else empty
+          const cached = readCachedProfile(role, userId);
+          if (cached) setForm({ ...emptyForm(empIdFromLogin, userEmail), ...cached });
+          else setForm(emptyForm(empIdFromLogin, userEmail));
+        }
       } catch (e) {
         console.error(e);
         if (mounted) setError(e?.message || "Failed to load profile");
@@ -243,7 +303,10 @@ export default function EmployeeSignIn() {
   const addEducation = () => {
     setForm((p) => ({
       ...p,
-      education: [...p.education, { qualification: "", institution: "", yearOfPassing: "", specialization: "" }],
+      education: [
+        ...p.education,
+        { qualification: "", institution: "", yearOfPassing: "", specialization: "" },
+      ],
     }));
   };
 
@@ -265,7 +328,10 @@ export default function EmployeeSignIn() {
   const addExperience = () => {
     setForm((p) => ({
       ...p,
-      experience: [...p.experience, { organization: "", designation: "", duration: "", reasonForLeaving: "" }],
+      experience: [
+        ...p.experience,
+        { organization: "", designation: "", duration: "", reasonForLeaving: "" },
+      ],
     }));
   };
 
@@ -343,26 +409,107 @@ export default function EmployeeSignIn() {
         return;
       }
 
+      // ✅ EMPLOYEE save to hrmss_employee_profiles
+      if (role === "employee") {
+        const empId = String(form.employeeId || empIdFromLogin || "").trim();
+        if (!empId) {
+          setError("Employee ID missing");
+          return;
+        }
+
+        let avatar_url = form.avatar || "";
+        if (avatarRemoved) {
+          avatar_url = null;
+        } else if (avatarFile) {
+          avatar_url = await uploadAvatar({ folderKey: empId, file: avatarFile });
+        } else {
+          if (String(avatar_url).startsWith("blob:")) avatar_url = null;
+        }
+
+        const payload = {
+          employee_id: empId,
+          profile_key: empId,
+
+          // ✅ IMPORTANT: Finish setup panna than true
+          profile_completed: true,
+
+          full_name: form.fullName || null,
+          dob: form.dob || null,
+          gender: form.gender || null,
+          marital_status: form.maritalStatus || null,
+          blood_group: form.bloodGroup || null,
+
+          personal_email: form.personalEmail || null,
+          official_email: form.officialEmail || null,
+          mobile_number: form.mobileNumber || null,
+          alternate_contact_number: form.alternateContactNumber || null,
+
+          current_address: form.currentAddress || null,
+          permanent_address: form.permanentAddress || null,
+
+          education: Array.isArray(form.education) ? form.education : [],
+          experience: Array.isArray(form.experience) ? form.experience : [],
+
+          primary_skills: form.primarySkills || null,
+          secondary_skills: form.secondarySkills || null,
+          tools_technologies: form.toolsTechnologies || null,
+
+          account_holder_name: form.accountHolderName || null,
+          bank_name: form.bankName || null,
+          account_number: form.accountNumber || null,
+          ifsc_code: form.ifscCode || null,
+          branch: form.branch || null,
+
+          emergency_name: form.emergencyName || null,
+          emergency_relationship: form.emergencyRelationship || null,
+          emergency_contact_number: form.emergencyContactNumber || null,
+
+          location: form.location || null,
+          avatar_url: avatar_url || null,
+        };
+
+        const { error: upErr } = await supabase
+          .from("hrmss_employee_profiles")
+          .upsert(payload, { onConflict: "employee_id" });
+
+        if (upErr) throw upErr;
+
+        if (avatar_url && String(form.avatar).startsWith("blob:")) {
+          const old = form.avatar;
+          onChange("avatar", avatar_url);
+          try {
+            URL.revokeObjectURL(old);
+          } catch {}
+        }
+
+        /* ✅ ADD: Save same details to localStorage for MyProfile page */
+        try {
+          const cacheForm = {
+            ...form,
+            employeeId: empId,
+            avatar: avatar_url || "",
+          };
+          localStorage.setItem(PROFILE_CACHE_KEY("employee", empId), JSON.stringify(cacheForm));
+        } catch {}
+
+        localStorage.setItem(COMPLETION_KEY(role), "true");
+
+        // ✅ finish -> dashboard
+        navigate(redirectTo || ROLE_REDIRECTS.employee, { replace: true });
+        return;
+      }
+
+      // ✅ Other roles (existing)
       const authCache = readAuthSession();
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData?.session?.user || null;
 
       const userId = user?.id || authCache?.id || null;
       const userEmail =
-        user?.email ||
-        authCache?.email ||
-        authCache?.official_email ||
-        authCache?.identifier ||
-        "";
+        user?.email || authCache?.email || authCache?.official_email || authCache?.identifier || "";
 
       if (!userId) {
         navigate("/login", { replace: true, state: { redirectTo: "/sign-in", role } });
-        return;
-      }
-
-      const profile_key = computeProfileKey({ role, form, userEmail });
-      if (!profile_key) {
-        setError("Profile Key missing. (employeeId / officialEmail required)");
         return;
       }
 
@@ -370,7 +517,7 @@ export default function EmployeeSignIn() {
       if (avatarRemoved) {
         avatar_url = null;
       } else if (avatarFile) {
-        avatar_url = await uploadAvatar({ userId, file: avatarFile });
+        avatar_url = await uploadAvatar({ folderKey: userId, file: avatarFile });
       } else {
         if (String(avatar_url).startsWith("blob:")) avatar_url = null;
       }
@@ -378,7 +525,7 @@ export default function EmployeeSignIn() {
       const payload = {
         user_id: userId,
         role,
-        profile_key,
+        profile_key: userEmail || form.employeeId || null,
 
         employee_id: form.employeeId || null,
         full_name: form.fullName || null,
@@ -416,7 +563,9 @@ export default function EmployeeSignIn() {
         avatar_url: avatar_url || null,
       };
 
-      const { error: upErr } = await supabase.from("hrmss_profiles").upsert(payload, { onConflict: "user_id" });
+      const { error: upErr } = await supabase
+        .from("hrmss_profiles")
+        .upsert(payload, { onConflict: "user_id" });
       if (upErr) throw upErr;
 
       if (avatar_url && String(form.avatar).startsWith("blob:")) {
@@ -427,11 +576,16 @@ export default function EmployeeSignIn() {
         } catch {}
       }
 
-      localStorage.setItem(COMPLETION_KEY(role), "true");
+      /* ✅ OPTIONAL: cache for MyProfile (hr/admin/manager) */
+      try {
+        const cacheForm = {
+          ...form,
+          avatar: avatar_url || "",
+        };
+        localStorage.setItem(PROFILE_CACHE_KEY(role, userId), JSON.stringify(cacheForm));
+      } catch {}
 
-      // ✅ This is the important part:
-      // From Login "Sign In" button we pass redirectTo="/login"
-      // so after save it comes back to Login page.
+      localStorage.setItem(COMPLETION_KEY(role), "true");
       navigate(redirectTo, { replace: true });
     } catch (e) {
       console.error(e);

@@ -8,6 +8,8 @@ import {
   LayoutPanelTop,
   LogOut,
   Shield,
+  User,
+  UserCircle2,
   Users,
 } from "lucide-react";
 import { getManagerSession } from "./managerData";
@@ -17,7 +19,8 @@ const navItems = [
   { to: "/manager-dashboard/approvals", label: "Leave Approvals", icon: CheckSquare },
   { to: "/manager-dashboard/team", label: "Team Members", icon: Users },
   { to: "/manager-dashboard/payroll", label: "Payroll & Payslips", icon: LayoutPanelTop },
-  { to: "/manager-dashboard/notifications", label: "Notifications", icon: Bell },
+  // { to: "/manager-dashboard/notifications", label: "Notifications", icon: Bell },
+  // { to: "/manager-dashboard/profile", label: "My Profile", icon: User },
 ];
 
 const NavItem = ({ to, icon: Icon, label, end }) => (
@@ -92,7 +95,7 @@ export default function ManagerLayout() {
         <header className="bg-white border-b sticky top-0 z-40">
           <div className="px-6 py-4 flex flex-col gap-1">
             <div className="text-xs uppercase tracking-wide text-slate-500">Manager Portal</div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <p className="text-lg font-bold text-slate-900">Control Center</p>
               <span className="text-xs text-indigo-700 bg-indigo-100 px-2 py-1 rounded-full inline-flex items-center gap-1">
                 <BarChart3 size={14} /> Real-time overview
@@ -100,6 +103,34 @@ export default function ManagerLayout() {
               <span className="text-xs text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full inline-flex items-center gap-1">
                 Role: {approver ? "Approver" : "Viewer"}
               </span>
+              <div className="flex items-center gap-2 ml-auto">
+                <NavLink
+                  to="/manager-dashboard/notifications"
+                  className={({ isActive }) =>
+                    `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? "bg-indigo-700 text-white shadow"
+                        : "text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                    }`
+                  }
+                >
+                  <Bell size={16} />
+                  Notifications
+                </NavLink>
+                <NavLink
+                  to="/manager-dashboard/profile"
+                  className={({ isActive }) =>
+                    `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? "bg-indigo-700 text-white shadow"
+                        : "text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                    }`
+                  }
+                >
+                  <UserCircle2 size={16} />
+                  My Profile
+                </NavLink>
+              </div>
             </div>
           </div>
         </header>

@@ -2,6 +2,9 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/auth/Login.jsx";
 
+/* ✅ Route Guard */
+import RequireProfileSetup from "./routes/RequireProfileSetup.jsx";
+
 /* ================= HR ================= */
 import HrLayout from "./pages/hr/HrLayout";
 import HrHome from "./pages/hr/HrHome";
@@ -41,6 +44,7 @@ import ManagerApprovals from "./pages/manager/ManagerApprovals.jsx";
 import ManagerTeam from "./pages/manager/ManagerTeam.jsx";
 import ManagerPayroll from "./pages/manager/ManagerPayroll.jsx";
 import ManagerNotifications from "./pages/manager/ManagerNotifications.jsx";
+import ManagerProfile from "./pages/manager/ManagerProfile.jsx";
 
 import ManagerApproverLayout from "./pages/managerApprover/ManagerApproverLayout.jsx";
 import ManagerApproverDashboard from "./pages/managerApprover/ManagerApproverDashboard.jsx";
@@ -78,17 +82,22 @@ export default function App() {
       {/* auth */}
       <Route path="/login" element={<Login />} />
 
-      {/* ✅ Sign In route (your Login Sign In button uses this) */}
+      {/* ✅ Sign In route */}
       <Route path="/sign-in" element={<EmployeeSignIn />} />
-
-      {/* optional alias (ok to keep) */}
       <Route path="/employee-signin" element={<EmployeeSignIn />} />
 
-      {/* common */}
+      {/* common (no guard) */}
       <Route path="/people" element={<PeopleDirectory />} />
 
       {/* ================= HR ================= */}
-      <Route path="/hr-dashboard" element={<HrLayout />}>
+      <Route
+        path="/hr-dashboard"
+        element={
+          <RequireProfileSetup>
+            <HrLayout />
+          </RequireProfileSetup>
+        }
+      >
         <Route index element={<HrHome />} />
         <Route path="payroll" element={<Payroll basePath="/hr-dashboard" />} />
         <Route path="payslips" element={<PayslipManagement basePath="/hr-dashboard" />} />
@@ -100,7 +109,14 @@ export default function App() {
       </Route>
 
       {/* ================= ADMIN ================= */}
-      <Route path="/dashboard" element={<DashboardLayout />}>
+      <Route
+        path="/dashboard"
+        element={
+          <RequireProfileSetup>
+            <DashboardLayout />
+          </RequireProfileSetup>
+        }
+      >
         <Route index element={<AdminDashboard />} />
         <Route path="employees" element={<Employees />} />
         <Route path="attendance" element={<AdminAttendance />} />
@@ -112,6 +128,8 @@ export default function App() {
       </Route>
 
       {/* ================= ADMIN HEAD ================= */}
+      {/* NOTE: login flow-ல admin-head role இல்லனா, guard போட்டா sign-in loop ஆகலாம்.
+         Admin-Head-க்கும் same flow வேண்டும்னா சொல்லுங்க; completion key + role mapping add பண்ணிடுறேன். */}
       <Route path="/admin-head" element={<AdminHeadLayout />}>
         <Route index element={<AdminHeadDashboard />} />
         <Route path="approvals" element={<AdminHeadApprovals />} />
@@ -125,24 +143,47 @@ export default function App() {
       </Route>
 
       {/* ================= MANAGER ================= */}
-      <Route path="/manager-dashboard" element={<ManagerLayout />}>
+      <Route
+        path="/manager-dashboard"
+        element={
+          <RequireProfileSetup>
+            <ManagerLayout />
+          </RequireProfileSetup>
+        }
+      >
         <Route index element={<ManagerDashboard />} />
         <Route path="approvals" element={<ManagerApprovals />} />
         <Route path="team" element={<ManagerTeam />} />
         <Route path="payroll" element={<ManagerPayroll />} />
         <Route path="notifications" element={<ManagerNotifications />} />
+        <Route path="profile" element={<ManagerProfile />} />
       </Route>
 
-      <Route path="/manager-approver-dashboard" element={<ManagerApproverLayout />}>
+      <Route
+        path="/manager-approver-dashboard"
+        element={
+          <RequireProfileSetup>
+            <ManagerApproverLayout />
+          </RequireProfileSetup>
+        }
+      >
         <Route index element={<ManagerApproverDashboard />} />
         <Route path="approvals" element={<ManagerApproverApprovals />} />
         <Route path="team" element={<ManagerApproverTeam />} />
         <Route path="payroll" element={<ManagerApproverPayroll />} />
         <Route path="notifications" element={<ManagerApproverNotifications />} />
+        <Route path="profile" element={<ManagerProfile />} />
       </Route>
 
       {/* ================= EMPLOYEE ================= */}
-      <Route path="/employee-dashboard" element={<EmployeeLayout />}>
+      <Route
+        path="/employee-dashboard"
+        element={
+          <RequireProfileSetup>
+            <EmployeeLayout />
+          </RequireProfileSetup>
+        }
+      >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<EmployeeDashboard />} />
         <Route path="profile" element={<MyProfile />} />

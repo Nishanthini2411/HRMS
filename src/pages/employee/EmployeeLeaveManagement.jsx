@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Eye, Pencil, Plus, X } from "lucide-react";
+import { supabase } from "../../lib/supabaseClient";
 
 /* ---------------- CONSTANTS ---------------- */
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
-const LS_KEY = (empId) => `HRMS_EMP_LEAVES_${empId}`;
 
 const leaveTypes = [
   "Casual Leave",
@@ -21,24 +21,8 @@ const tone = {
   Rejected: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
-const uid = () => `LR-${Math.floor(1000 + Math.random() * 9000)}`;
-
-/* ---------------- HELPERS ---------------- */
-const loadLeaves = (id) => {
-  try {
-    const raw = localStorage.getItem(LS_KEY(id));
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveLeaves = (id, rows) =>
-  localStorage.setItem(LS_KEY(id), JSON.stringify(rows));
-
 const fmt = (iso) => new Date(iso).toLocaleString();
 
-/* ⏱ TIME DURATION CALC */
 const calcDuration = (from, to) => {
   if (!from || !to) return "";
   const [fh, fm] = from.split(":").map(Number);
@@ -47,9 +31,7 @@ const calcDuration = (from, to) => {
   if (diff <= 0) return "";
   const h = Math.floor(diff / 60);
   const m = diff % 60;
-  return `${h ? `${h} Hour${h > 1 ? "s" : ""}` : ""}${h && m ? " " : ""}${
-    m ? `${m} Minutes` : ""
-  }`;
+  return `${h ? `${h} Hour${h > 1 ? "s" : ""}` : ""}${h && m ? " " : ""}${m ? `${m} Minutes` : ""}`;
 };
 
 const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
@@ -71,7 +53,7 @@ const ModalShell = ({ title, onClose, children }) => (
 
 /* ---------------- MAIN ---------------- */
 export default function EmployeeLeaveManagement() {
-  const [rows, setRows] = useState(() => loadLeaves(EMP.id));
+  const [rows, setRows] = useState([]);
 
   const [viewId, setViewId] = useState(null);
   const [editId, setEditId] = useState(null);
@@ -98,10 +80,41 @@ export default function EmployeeLeaveManagement() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
 
-  useEffect(() => {
-    saveLeaves(EMP.id, rows);
-  }, [rows]);
+  /* ---------------- FETCH ---------------- */
+  const fetchLeaves = async () => {
+    const { data, error } = await supabase
+      .from("employee_leaves")
+      .select("*")
+      .eq("employee_id", EMP.id)
+      .order("applied_at", { ascending: false });
 
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setRows(
+      data.map((r) => ({
+        id: r.id,
+        leaveType: r.leave_type,
+        mode: r.mode,
+        from: r.from_date,
+        to: r.to_date,
+        timeFrom: r.time_from,
+        timeTo: r.time_to,
+        hours: r.hours,
+        reason: r.reason,
+        status: r.status,
+        appliedAt: r.applied_at,
+      }))
+    );
+  };
+
+  useEffect(() => {
+    fetchLeaves();
+  }, []);
+
+  /* ---------------- STATS ---------------- */
   const stats = useMemo(
     () => ({
       Pending: rows.filter((r) => r.status === "Pending").length,
@@ -119,114 +132,99 @@ export default function EmployeeLeaveManagement() {
       const q = search.toLowerCase();
       list = list.filter(
         (r) =>
-          r.id.toLowerCase().includes(q) ||
           r.leaveType.toLowerCase().includes(q) ||
-          (r.mode || "").toLowerCase().includes(q)
+          r.mode.toLowerCase().includes(q)
       );
     }
-    return list.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
+    return list;
   }, [rows, statusFilter, search]);
 
   const selectedView = rows.find((r) => r.id === viewId);
   const selectedEdit = rows.find((r) => r.id === editId);
 
-  /* CREATE */
-  const createLeave = (e) => {
+  /* ---------------- CREATE ---------------- */
+  const createLeave = async (e) => {
     e.preventDefault();
 
-    const hours = needsTime(cMode) ? calcDuration(cFromTime, cToTime) : "";
+    const payload = {
+      employee_id: EMP.id,
+      employee_name: EMP.name,
+      leave_type: cType,
+      mode: cMode,
+      from_date: cFrom,
+      to_date: cMode === "Full Day" ? cTo : cFrom,
+      time_from: needsTime(cMode) ? cFromTime : null,
+      time_to: needsTime(cMode) ? cToTime : null,
+      hours: needsTime(cMode) ? calcDuration(cFromTime, cToTime) : null,
+      reason: cReason,
+      status: "Pending",
+    };
 
-    setRows((p) => [
-      {
-        id: uid(),
-        employeeId: EMP.id,
-        employeeName: EMP.name,
-        leaveType: cType,
-        mode: cMode,
-        from: cFrom,
-        to: cMode === "Full Day" ? cTo : cFrom,
-        timeFrom: needsTime(cMode) ? cFromTime : "",
-        timeTo: needsTime(cMode) ? cToTime : "",
-        hours: needsTime(cMode) ? hours : "",
-        reason: cReason,
-        status: "Pending",
-        appliedAt: new Date().toISOString(),
-      },
-      ...p,
-    ]);
+    const { error } = await supabase.from("employee_leaves").insert(payload);
+    if (error) return alert(error.message);
 
     setCreateOpen(false);
-    setCFrom("");
-    setCTo("");
-    setCFromTime("");
-    setCToTime("");
-    setCReason("");
+    setCFrom(""); setCTo(""); setCFromTime(""); setCToTime(""); setCReason("");
+    fetchLeaves();
   };
 
-  /* EDIT */
+  /* ---------------- EDIT ---------------- */
   const openEdit = (r) => {
     setEditId(r.id);
     setEType(r.leaveType);
-    setEMode(r.mode || "Full Day");
-    setEFrom(r.from || "");
-    setETo(r.to || "");
+    setEMode(r.mode);
+    setEFrom(r.from);
+    setETo(r.to);
     setEFromTime(r.timeFrom || "");
     setEToTime(r.timeTo || "");
     setEReason(r.reason || "");
   };
 
-  const saveEdit = (e) => {
+  const saveEdit = async (e) => {
     e.preventDefault();
 
-    setRows((p) =>
-      p.map((r) =>
-        r.id === editId
-          ? {
-              ...r,
-              leaveType: eType,
-              mode: eMode,
-              from: eFrom,
-              to: eMode === "Full Day" ? eTo : eFrom,
-              timeFrom: needsTime(eMode) ? eFromTime : "",
-              timeTo: needsTime(eMode) ? eToTime : "",
-              hours: needsTime(eMode) ? calcDuration(eFromTime, eToTime) : "",
-              reason: eReason,
-            }
-          : r
-      )
-    );
+    const { error } = await supabase
+      .from("employee_leaves")
+      .update({
+        leave_type: eType,
+        mode: eMode,
+        from_date: eFrom,
+        to_date: eMode === "Full Day" ? eTo : eFrom,
+        time_from: needsTime(eMode) ? eFromTime : null,
+        time_to: needsTime(eMode) ? eToTime : null,
+        hours: needsTime(eMode) ? calcDuration(eFromTime, eToTime) : null,
+        reason: eReason,
+      })
+      .eq("id", editId);
+
+    if (error) return alert(error.message);
 
     setEditId(null);
+    fetchLeaves();
   };
 
   const TimePreset = ({ onMorning, onAfternoon }) => (
-    <div className="flex flex-wrap gap-2">
-      <button
-        type="button"
-        onClick={onMorning}
-        className="px-3 py-1.5 text-xs rounded-full border bg-white hover:bg-slate-50"
-      >
+    <div className="flex gap-2">
+      <button type="button" onClick={onMorning} className="px-3 py-1 text-xs border rounded">
         Morning (09:00 - 13:00)
       </button>
-      <button
-        type="button"
-        onClick={onAfternoon}
-        className="px-3 py-1.5 text-xs rounded-full border bg-white hover:bg-slate-50"
-      >
+      <button type="button" onClick={onAfternoon} className="px-3 py-1 text-xs border rounded">
         Afternoon (13:00 - 17:00)
       </button>
     </div>
   );
 
+  /* ---------------- UI ---------------- */
   return (
     <div className="space-y-5">
+
       {/* HEADER */}
       <div className="bg-slate-800 text-white rounded-2xl p-5">
         <div className="flex justify-between">
           <div>
             <h2 className="text-xl font-semibold">Leave Management</h2>
             <p className="text-sm text-slate-300">
-              Full Day · Half Day (Time) · Permission (Time Based)
+              Full Day · Half Day · Permission
             </p>
           </div>
           <button
@@ -273,76 +271,43 @@ export default function EmployeeLeaveManagement() {
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
-
           <tbody className="divide-y">
             {filtered.map((r) => (
-              <tr key={r.id} className="hover:bg-slate-50">
+              <tr key={r.id}>
                 <td className="px-4 py-3">
                   <div className="font-semibold">{r.leaveType}</div>
                   <div className="text-xs text-slate-500">
-                    #{r.id} • {r.mode}
-                    {needsTime(r.mode) && r.hours ? ` • ${r.hours}` : ""}
+                    {r.mode} {r.hours ? `• ${r.hours}` : ""}
                   </div>
                 </td>
-
                 <td className="px-4 py-3">
-                  {r.from}
-                  {r.mode === "Full Day" ? ` → ${r.to}` : ""}
-                  {needsTime(r.mode) && r.timeFrom && r.timeTo ? (
-                    <div className="text-xs text-slate-500 mt-1">
-                      {r.timeFrom} → {r.timeTo}
-                      {r.hours ? ` • ${r.hours}` : ""}
-                    </div>
-                  ) : null}
+                  {r.from} {r.to && `→ ${r.to}`}
                 </td>
-
                 <td className="px-4 py-3">
                   <span className={`px-2 py-1 rounded-full border text-xs ${tone[r.status]}`}>
                     {r.status}
                   </span>
                 </td>
-
                 <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => setViewId(r.id)}
-                      className="p-2 hover:bg-slate-100 rounded-lg"
-                      title="View"
-                    >
-                      <Eye size={16} />
-                    </button>
-
-                    <button
-                      disabled={r.status !== "Pending"}
-                      onClick={() => openEdit(r)}
-                      className="p-2 hover:bg-slate-100 rounded-lg disabled:opacity-40"
-                      title="Edit"
-                    >
-                      <Pencil size={16} />
-                    </button>
-
-                    <button
-                      onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
-                      className="p-2 hover:bg-rose-50 text-rose-600 rounded-lg"
-                      title="Delete"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+                  <button onClick={() => setViewId(r.id)} className="p-2">
+                    <Eye size={16} />
+                  </button>
+                  <button
+                    disabled={r.status !== "Pending"}
+                    onClick={() => openEdit(r)}
+                    className="p-2 disabled:opacity-40"
+                  >
+                    <Pencil size={16} />
+                  </button>
                 </td>
               </tr>
             ))}
-
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
-                  No leave requests found.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
+
+ 
+
 
       {/* VIEW MODAL */}
       {selectedView && (

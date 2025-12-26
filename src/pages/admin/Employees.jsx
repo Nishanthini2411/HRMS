@@ -1,5 +1,5 @@
 // src/pages/hr/Employees.jsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
 /* ---------------------- SAMPLE DATA ---------------------- */
@@ -84,6 +84,47 @@ export default function Employees() {
     otherWorkLocation: "",
   });
 
+  // ✅ PAGE LOAD: DB-ல இருந்து employee list fetch பண்ணி UI-ல show
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      if (!isSupabaseConfigured) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("hrmss_employees")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data.map((r) => ({
+            id: r.employee_id || "",
+            name: r.full_name || "",
+            department: r.department || "",
+            role: r.role || "",
+            email: r.email || "",
+            phone: r.phone || "",
+            location: r.location || "",
+            status: r.status || "Active",
+            joinDate: r.join_date || "",
+            employeeType: r.employee_type || "",
+            avatar: r.avatar || "",
+            gender: r.gender || "",
+            dob: r.dob || "",
+            reportingManager: r.reporting_manager || "",
+          }));
+          setEmployees(mapped);
+        }
+      } catch (err) {
+        console.error("Fetch employees failed:", err);
+        // fallback: keep initialEmployees
+      }
+    };
+
+    fetchEmployees();
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setNewEmployee((p) => ({ ...p, [name]: value }));
@@ -129,30 +170,13 @@ export default function Employees() {
 
     // ✅ Local duplicate check
     const exists = employees.some(
-      (x) => String(x.id || "").toLowerCase() === String(newEmployee.id).toLowerCase()
+      (x) =>
+        String(x.id || "").toLowerCase() ===
+        String(newEmployee.id).toLowerCase()
     );
     if (exists) {
       alert("This Employee ID already exists");
       return;
-    }
-
-    // ✅ Save ID + Password into Supabase (so ONLY that employee can login)
-    // Requires SQL RPC function: upsert_employee_account(p_employee_id text, p_password text)
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase.rpc("upsert_employee_account", {
-          p_employee_id: String(newEmployee.id || "").trim(),
-          p_password: String(newEmployee.password || ""),
-        });
-        if (error) throw error;
-      } catch (err) {
-        console.error(err);
-        alert(err?.message || "Failed to save employee login credentials");
-        return;
-      }
-    } else {
-      // If supabase env missing, still allow UI add, but login restriction won't work.
-      console.warn("Supabase not configured. Employee credentials not saved.");
     }
 
     const locationText = buildLocationText(
@@ -160,22 +184,86 @@ export default function Employees() {
       newEmployee.otherWorkLocation
     );
 
-    // ✅ Do NOT store password in UI state list
-    const { password, ...safeEmployee } = newEmployee;
+    // ✅ 1) credentials save + 2) details save (persist)
+    if (isSupabaseConfigured) {
+      try {
+        // 1) Save login credentials (employee_accounts table via RPC)
+        const { error: credErr } = await supabase.rpc("upsert_employee_account", {
+          p_employee_id: String(newEmployee.id || "").trim(),
+          p_password: String(newEmployee.password || ""),
+        });
+        if (credErr) throw credErr;
 
-    setEmployees((prev) => [
-      ...prev,
-      {
-        ...safeEmployee,
-        // keep your existing optional fields
-        email: "",
-        phone: "",
-        location: locationText || "",
-        dob: "",
-        status: "Active",
-        avatar: "",
-      },
-    ]);
+        // 2) Save employee details to DB table (so refresh also show)
+        const payload = {
+          employee_id: String(newEmployee.id || "").trim(),
+          full_name: String(newEmployee.name || "").trim(),
+          department: newEmployee.department || null,
+          role: newEmployee.role || null,
+          employee_type: newEmployee.employeeType || null,
+          gender: newEmployee.gender || null,
+          reporting_manager: newEmployee.reportingManager || null,
+          join_date: newEmployee.joinDate || null,
+          location: locationText || null,
+          status: "Active",
+          email: null,
+          phone: null,
+          dob: null,
+          avatar: null,
+        };
+
+        const { data: inserted, error: insErr } = await supabase
+          .from("hrmss_employees")
+          .insert([payload])
+          .select("*")
+          .single();
+
+        if (insErr) throw insErr;
+
+        // UI update (password store pannama)
+        setEmployees((prev) => [
+          {
+            id: inserted.employee_id,
+            name: inserted.full_name,
+            department: inserted.department || "",
+            role: inserted.role || "",
+            email: inserted.email || "",
+            phone: inserted.phone || "",
+            location: inserted.location || "",
+            status: inserted.status || "Active",
+            joinDate: inserted.join_date || "",
+            employeeType: inserted.employee_type || "",
+            avatar: inserted.avatar || "",
+            gender: inserted.gender || "",
+            dob: inserted.dob || "",
+            reportingManager: inserted.reporting_manager || "",
+          },
+          ...prev,
+        ]);
+      } catch (err) {
+        console.error(err);
+        alert(err?.message || "Failed to save employee");
+        return;
+      }
+    } else {
+      console.warn("Supabase not configured. Employee not persisted.");
+
+      // ✅ Do NOT store password in UI state list
+      const { password, ...safeEmployee } = newEmployee;
+
+      setEmployees((prev) => [
+        ...prev,
+        {
+          ...safeEmployee,
+          email: "",
+          phone: "",
+          location: locationText || "",
+          dob: "",
+          status: "Active",
+          avatar: "",
+        },
+      ]);
+    }
 
     setIsAddModalOpen(false);
     setNewEmployee({
@@ -356,10 +444,7 @@ export default function Employees() {
               </button>
             </div>
 
-            <form
-              onSubmit={handleAddEmployee}
-              className="grid gap-4 md:grid-cols-2"
-            >
+            <form onSubmit={handleAddEmployee} className="grid gap-4 md:grid-cols-2">
               <input
                 name="id"
                 value={newEmployee.id}
@@ -449,15 +534,10 @@ export default function Employees() {
 
               {/* ✅ Work Location Checkboxes */}
               <div className="md:col-span-2 rounded-xl border border-slate-200 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  Work Location
-                </p>
+                <p className="text-sm font-semibold text-slate-900">Work Location</p>
                 <div className="mt-3 flex flex-wrap gap-4">
                   {WORK_LOCATIONS.map((loc) => (
-                    <label
-                      key={loc}
-                      className="flex items-center gap-2 text-sm text-slate-700"
-                    >
+                    <label key={loc} className="flex items-center gap-2 text-sm text-slate-700">
                       <input
                         type="checkbox"
                         checked={newEmployee.workLocations.includes(loc)}
@@ -487,10 +567,7 @@ export default function Employees() {
 
                 <div className="mt-2 text-xs text-slate-500">
                   Selected:{" "}
-                  {buildLocationText(
-                    newEmployee.workLocations,
-                    newEmployee.otherWorkLocation
-                  ) || "—"}
+                  {buildLocationText(newEmployee.workLocations, newEmployee.otherWorkLocation) || "—"}
                 </div>
               </div>
 

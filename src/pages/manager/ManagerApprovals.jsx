@@ -132,7 +132,6 @@ export default function ManagerApprovals() {
             (manager1@hrms.com).
           </div>
         </div>
-      )}
-    </div>
+      )}    </div>
   );
 }

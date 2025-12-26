@@ -1,55 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabaseClient";
 
-// ---------------- DEMO DATA ----------------
-const seedRequests = [
-  // Employee leaves
-  {
-    id: "LR-2001",
-    ownerRole: "employee",
-    ownerId: "EMP-001",
-    ownerName: "Priya Sharma",
-    leaveType: "Casual Leave",
-    from: "2025-12-15",
-    to: "2025-12-16",
-    reason: "Family function",
-    status: "Pending",
-    appliedAt: "2025-12-12T09:10:00",
-    decisionNote: "",
-    decidedAt: "",
-  },
-  {
-    id: "LR-2002",
-    ownerRole: "employee",
-    ownerId: "EMP-001",
-    ownerName: "Priya Sharma",
-    leaveType: "Sick Leave",
-    from: "2025-12-10",
-    to: "2025-12-10",
-    reason: "Fever",
-    status: "Approved",
-    appliedAt: "2025-12-10T11:30:00",
-    decisionNote: "Take rest. Get well soon.",
-    decidedAt: "2025-12-10",
-  },
+/* ---------------- DEMO USERS (replace later with auth) ---------------- */
+const currentEmployee = { id: "EMP-001", name: "Priya Sharma" };
+const currentAdmin = { id: "ADM-001", name: "Admin User" };
 
-  // Admin leaves
-  {
-    id: "LR-9001",
-    ownerRole: "admin",
-    ownerId: "ADM-001",
-    ownerName: "Admin User",
-    leaveType: "Paid Leave",
-    from: "2025-12-20",
-    to: "2025-12-21",
-    reason: "Personal work",
-    status: "Pending",
-    appliedAt: "2025-12-12T08:20:00",
-    decisionNote: "",
-    decidedAt: "",
-  },
-];
-
-// ---------------- HELPERS ----------------
+/* ---------------- HELPERS ---------------- */
 const diffDaysInclusive = (from, to) => {
   const a = new Date(from);
   const b = new Date(to);
@@ -63,15 +19,18 @@ const diffDaysInclusive = (from, to) => {
 const pill = (status) => {
   const base =
     "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border";
-  if (status === "Approved") return `${base} bg-emerald-50 text-emerald-700 border-emerald-200`;
-  if (status === "Rejected") return `${base} bg-rose-50 text-rose-700 border-rose-200`;
+  if (status === "Approved")
+    return `${base} bg-emerald-50 text-emerald-700 border-emerald-200`;
+  if (status === "Rejected")
+    return `${base} bg-rose-50 text-rose-700 border-rose-200`;
   return `${base} bg-amber-50 text-amber-800 border-amber-200`;
 };
 
 const roleBadge = (role) => {
   const base =
     "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border";
-  if (role === "employee") return `${base} bg-indigo-50 text-indigo-700 border-indigo-200`;
+  if (role === "employee")
+    return `${base} bg-indigo-50 text-indigo-700 border-indigo-200`;
   return `${base} bg-slate-50 text-slate-700 border-slate-200`;
 };
 
@@ -90,19 +49,38 @@ const initials = (name = "") => {
   return (a + b).toUpperCase();
 };
 
-// ---------------- PAGE ----------------
+/* ---------------- MAPPER: DB -> UI ---------------- */
+const mapDbToUi = (r) => {
+  // ownerRole inference (simple)
+  const isAdmin = (r.employee_id || "").toUpperCase().startsWith("ADM");
+  return {
+    id: r.id,
+    ownerRole: isAdmin ? "admin" : "employee",
+    ownerId: r.employee_id,
+    ownerName: r.employee_name,
+    leaveType: r.leave_type,
+    from: r.from_date,
+    to: r.to_date || r.from_date,
+    reason: r.reason,
+    status: r.status,
+    appliedAt: r.applied_at,
+    // optional fields (not in table) -> keep for UI safely
+    decisionNote: "",
+    decidedAt: "",
+  };
+};
+
+/* ---------------- PAGE ---------------- */
 const LeaveManagement = () => {
-  // ✅ Demo user (replace with real auth user)
-  const currentEmployee = { id: "EMP-001", name: "Priya Sharma" };
-  const currentAdmin = { id: "ADM-001", name: "Admin User" };
-
   const [mode, setMode] = useState("employee"); // "employee" | "admin"
-  const [requests, setRequests] = useState(seedRequests);
 
-  // Admin apply form open/close
+  // ✅ data from Supabase
+  const [requests, setRequests] = useState([]);
+
+  // Apply form open/close
   const [showApply, setShowApply] = useState(false);
 
-  // Apply form fields (admin only)
+  // Apply form fields (both roles)
   const [leaveType, setLeaveType] = useState("Casual Leave");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -128,15 +106,65 @@ const LeaveManagement = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [viewing]);
 
-  // ✅ Only show own letters depending on role
+  /* ---------------- FETCH FROM SUPABASE ---------------- */
+  const fetchRequests = async (activeMode = mode) => {
+    try {
+      let q = supabase
+        .from("employee_leaves")
+        .select("*")
+        .order("applied_at", { ascending: false });
+
+      // Employee sees only own
+      if (activeMode === "employee") {
+        q = q.eq("employee_id", currentEmployee.id);
+      }
+
+      // Admin sees ALL (employee + admin)
+      const { data, error } = await q;
+      if (error) throw error;
+
+      setRequests((data || []).map(mapDbToUi));
+    } catch (err) {
+      alert(err.message || "Failed to load leaves");
+    }
+  };
+
+  useEffect(() => {
+    fetchRequests(mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  /* ---------------- REALTIME: auto refresh for admin & employee ---------------- */
+  useEffect(() => {
+    const channel = supabase
+      .channel("employee_leaves_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "employee_leaves" },
+        () => {
+          fetchRequests(mode);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  /* ---------------- ROLE DATASET ---------------- */
   const dataset = useMemo(() => {
+    // Already filtered in query for employee,
+    // but keep safe filter here also.
     if (mode === "employee") {
       return requests.filter(
         (r) => r.ownerRole === "employee" && r.ownerId === currentEmployee.id
       );
     }
-    return requests.filter((r) => r.ownerRole === "admin" && r.ownerId === currentAdmin.id);
-  }, [mode, requests, currentEmployee.id, currentAdmin.id]);
+    // admin mode = show all
+    return requests;
+  }, [mode, requests]);
 
   const filtered = useMemo(() => {
     let list = [...dataset];
@@ -147,11 +175,11 @@ const LeaveManagement = () => {
     if (q) {
       list = list.filter(
         (r) =>
-          r.id.toLowerCase().includes(q) ||
-          r.leaveType.toLowerCase().includes(q) ||
-          r.reason.toLowerCase().includes(q) ||
-          r.ownerName.toLowerCase().includes(q) ||
-          r.ownerId.toLowerCase().includes(q)
+          (r.id || "").toLowerCase().includes(q) ||
+          (r.leaveType || "").toLowerCase().includes(q) ||
+          (r.reason || "").toLowerCase().includes(q) ||
+          (r.ownerName || "").toLowerCase().includes(q) ||
+          (r.ownerId || "").toLowerCase().includes(q)
       );
     }
 
@@ -179,7 +207,8 @@ const LeaveManagement = () => {
     setSummaryOpen(true);
   };
 
-  const submitAdminLeave = () => {
+  /* ---------------- APPLY (EMPLOYEE + ADMIN) -> SUPABASE INSERT ---------------- */
+  const submitLeave = async () => {
     if (!from || !to || !reason.trim()) {
       alert("Please fill From, To and Reason.");
       return;
@@ -189,39 +218,50 @@ const LeaveManagement = () => {
       return;
     }
 
-    const newReq = {
-      id: `LR-${Math.floor(1000 + Math.random() * 9000)}`,
-      ownerRole: "admin",
-      ownerId: currentAdmin.id,
-      ownerName: currentAdmin.name,
-      leaveType,
-      from,
-      to,
+    const who = mode === "employee" ? currentEmployee : currentAdmin;
+
+    const payload = {
+      employee_id: who.id,
+      employee_name: who.name,
+      leave_type: leaveType,
+      mode: "Full Day", // keep simple (you can extend later)
+      from_date: from,
+      to_date: to,
+      time_from: null,
+      time_to: null,
+      hours: null,
       reason: reason.trim(),
       status: "Pending",
-      appliedAt: new Date().toISOString(),
-      decisionNote: "",
-      decidedAt: "",
     };
 
-    setRequests((prev) => [newReq, ...prev]);
+    const { error } = await supabase.from("employee_leaves").insert(payload);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
     setFrom("");
     setTo("");
     setReason("");
     setShowApply(false);
-    alert("Leave letter submitted!");
+
+    // Admin wants instantly -> realtime already refreshes.
+    // Still fetch once (safe)
+    fetchRequests(mode);
+
+    alert("Leave request submitted!");
   };
 
   return (
     <section className="space-y-4">
-      {/* Header + Toggle + Admin Apply button */}
+      {/* Header + Toggle + Apply button */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Leave Letters</h1>
           <p className="text-sm text-gray-600">
             {mode === "employee"
-              ? "Employee can view only their own leave letters (no approval)."
-              : "HR/Admin can view their own leave letters and apply new leave (no approval)."}
+              ? "Employee can apply leave and view only their own leave letters."
+              : "Admin can view ALL employee leave letters and also apply leave."}
           </p>
         </div>
 
@@ -239,7 +279,9 @@ const LeaveManagement = () => {
                 setViewing(null);
               }}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-                mode === "employee" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
+                mode === "employee"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-700 hover:bg-gray-50"
               }`}
             >
               Employee
@@ -255,34 +297,37 @@ const LeaveManagement = () => {
                 setViewing(null);
               }}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-                mode === "admin" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
+                mode === "admin"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-700 hover:bg-gray-50"
               }`}
             >
               Admin
             </button>
           </div>
 
-          {/* Admin Apply Button */}
-          {mode === "admin" && (
-            <button
-              type="button"
-              onClick={() => setShowApply((s) => !s)}
-              className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition"
-            >
-              Apply Leave
-            </button>
-          )}
+          {/* Apply Button (both roles) */}
+          <button
+            type="button"
+            onClick={() => setShowApply((s) => !s)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition"
+          >
+            Apply Leave
+          </button>
         </div>
       </div>
 
-      {/* Admin Apply Form */}
-      {mode === "admin" && showApply && (
+      {/* Apply Form (both roles) */}
+      {showApply && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">Apply Leave (Admin)</h2>
+              <h2 className="text-lg font-semibold">
+                Apply Leave ({mode === "employee" ? "Employee" : "Admin"})
+              </h2>
               <p className="text-xs text-gray-500 mt-1">
-                {currentAdmin.name} • {currentAdmin.id}
+                {(mode === "employee" ? currentEmployee.name : currentAdmin.name)} •{" "}
+                {(mode === "employee" ? currentEmployee.id : currentAdmin.id)}
               </p>
             </div>
 
@@ -295,7 +340,10 @@ const LeaveManagement = () => {
             </button>
           </div>
 
-          <form className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={(e) => e.preventDefault()}>
+          <form
+            className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4"
+            onSubmit={(e) => e.preventDefault()}
+          >
             <div>
               <label className="block mb-1 text-sm text-gray-600">Leave Type</label>
               <select
@@ -305,6 +353,7 @@ const LeaveManagement = () => {
               >
                 <option>Casual Leave</option>
                 <option>Sick Leave</option>
+                <option>Annual Leave</option>
                 <option>Paid Leave</option>
               </select>
             </div>
@@ -355,7 +404,7 @@ const LeaveManagement = () => {
               </button>
               <button
                 type="button"
-                onClick={submitAdminLeave}
+                onClick={submitLeave}
                 className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
               >
                 Submit
@@ -367,22 +416,34 @@ const LeaveManagement = () => {
 
       {/* Summary (CLICKABLE) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <button onClick={() => openSummary("All")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
+        <button
+          onClick={() => openSummary("All")}
+          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
+        >
           <div className="text-xs text-gray-500">Total</div>
           <div className="text-xl font-semibold">{counts.total}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
         </button>
-        <button onClick={() => openSummary("Pending")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
+        <button
+          onClick={() => openSummary("Pending")}
+          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
+        >
           <div className="text-xs text-gray-500">Pending</div>
           <div className="text-xl font-semibold">{counts.pending}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
         </button>
-        <button onClick={() => openSummary("Approved")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
+        <button
+          onClick={() => openSummary("Approved")}
+          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
+        >
           <div className="text-xs text-gray-500">Approved</div>
           <div className="text-xl font-semibold">{counts.approved}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
         </button>
-        <button onClick={() => openSummary("Rejected")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
+        <button
+          onClick={() => openSummary("Rejected")}
+          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
+        >
           <div className="text-xs text-gray-500">Rejected</div>
           <div className="text-xl font-semibold">{counts.rejected}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
@@ -448,9 +509,11 @@ const LeaveManagement = () => {
                         <div className="min-w-0">
                           <div className="font-semibold">{r.leaveType}</div>
                           <div className="text-xs text-gray-500">
-                            #{r.id} • Applied: {date} {time}
+                            #{String(r.id).slice(0, 8)} • Applied: {date} {time}
                           </div>
-                          <div className="text-xs text-gray-600 mt-1 line-clamp-2">{r.reason}</div>
+                          <div className="text-xs text-gray-600 mt-1 line-clamp-2">
+                            {r.reason}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -462,13 +525,22 @@ const LeaveManagement = () => {
                       <div className="text-xs text-gray-500 mt-1">
                         {r.ownerName} • {r.ownerId}
                       </div>
+                      <div className="mt-1">
+                        <span className={roleBadge(r.ownerRole)}>
+                          Employment: {r.ownerRole === "employee" ? "Employee" : "Admin"}
+                        </span>
+                      </div>
                     </td>
 
                     <td className="px-4 py-3">{diffDaysInclusive(r.from, r.to)}</td>
 
                     <td className="px-4 py-3">
                       <span className={pill(r.status)}>{r.status}</span>
-                      {r.decidedAt && <div className="text-xs text-gray-500 mt-1">Decided: {r.decidedAt}</div>}
+                      {r.decidedAt && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          Decided: {r.decidedAt}
+                        </div>
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
@@ -490,7 +562,7 @@ const LeaveManagement = () => {
         </table>
       </div>
 
-      {/* ✅ Summary Details Modal */}
+      {/* Summary Details Modal */}
       {summaryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-4xl bg-white rounded-2xl shadow-lg border overflow-hidden">
@@ -557,7 +629,7 @@ const LeaveManagement = () => {
                             <td className="px-4 py-3">
                               <div className="font-semibold">{r.leaveType}</div>
                               <div className="text-xs text-gray-500">
-                                #{r.id} • Applied: {date} {time}
+                                #{String(r.id).slice(0, 8)} • Applied: {date} {time}
                               </div>
                               <div className="text-xs text-gray-600 mt-1 line-clamp-2">{r.reason}</div>
                             </td>
@@ -573,7 +645,6 @@ const LeaveManagement = () => {
 
                             <td className="px-4 py-3">
                               <span className={pill(r.status)}>{r.status}</span>
-                              {r.decidedAt && <div className="text-xs text-gray-500 mt-1">Decided: {r.decidedAt}</div>}
                             </td>
 
                             <td className="px-4 py-3">
@@ -609,7 +680,7 @@ const LeaveManagement = () => {
         </div>
       )}
 
-      {/* ✅ View Letter Modal (CLEAN PREMIUM) */}
+      {/* View Letter Modal */}
       {viewing && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
@@ -622,7 +693,9 @@ const LeaveManagement = () => {
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Leave request</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold">#{viewing.id}</span>
+                  <span className="text-lg font-semibold">
+                    #{String(viewing.id).slice(0, 8)}
+                  </span>
                   <span className={pill(viewing.status)}>{viewing.status}</span>
                 </div>
               </div>
@@ -660,7 +733,9 @@ const LeaveManagement = () => {
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                   <p className="text-[11px] text-slate-500">Days</p>
-                  <p className="font-semibold text-slate-900">{diffDaysInclusive(viewing.from, viewing.to)}</p>
+                  <p className="font-semibold text-slate-900">
+                    {diffDaysInclusive(viewing.from, viewing.to)}
+                  </p>
                 </div>
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                   <p className="text-[11px] text-slate-500">Applied</p>
@@ -679,9 +754,6 @@ const LeaveManagement = () => {
                 <p className="mt-1 text-slate-800 leading-relaxed">
                   {viewing.decisionNote || "No decision yet."}
                 </p>
-                {viewing.decidedAt && (
-                  <p className="mt-1 text-[11px] text-slate-500">Decided at: {fmtDT(viewing.decidedAt).date}</p>
-                )}
               </div>
             </div>
           </div>
