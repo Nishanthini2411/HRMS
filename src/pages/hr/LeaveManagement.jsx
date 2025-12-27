@@ -1,58 +1,56 @@
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
+import { supabase } from "../../lib/supabaseClient";
 
-// ---------------- DEMO DATA (Employee + Admin Requests) ----------------
-const seedRequests = [
-  {
-    id: "LR-2001",
-    ownerRole: "employee",
-    ownerId: "EMP-001",
-    ownerName: "Priya Sharma",
-    leaveType: "Casual Leave",
-    from: "2025-12-15",
-    to: "2025-12-16",
-    reason: "Family function",
-    status: "Pending",
-    appliedAt: "2025-12-12T09:10:00",
-    decisionNote: "",
-    decidedAt: "",
-    decidedBy: "",
-  },
-  {
-    id: "LR-2002",
-    ownerRole: "employee",
-    ownerId: "EMP-002",
-    ownerName: "Kavin Raj",
-    leaveType: "Sick Leave",
-    from: "2025-12-10",
-    to: "2025-12-10",
-    reason: "Fever",
-    status: "Approved",
-    appliedAt: "2025-12-10T11:30:00",
-    decisionNote: "Take rest.",
-    decidedAt: "2025-12-10",
-    decidedBy: "HR",
-  },
-  {
-    id: "LR-9001",
-    ownerRole: "admin",
-    ownerId: "ADM-001",
-    ownerName: "Admin User",
-    leaveType: "Paid Leave",
-    from: "2025-12-20",
-    to: "2025-12-21",
-    reason: "Personal work",
-    status: "Pending",
-    appliedAt: "2025-12-12T08:20:00",
-    decisionNote: "",
-    decidedAt: "",
-    decidedBy: "",
-  },
+/* ===================== CONFIG ===================== */
+const APPROVERS_TABLE = "hrmss_approvers";
+const LEAVES_TABLE = "hrmss_leave_requests";
+
+// ✅ demo HR (later read from auth/session)
+const currentHR = { id: "HR-001", name: "HR" };
+
+const leaveTypes = [
+  "Casual Leave",
+  "Sick Leave",
+  "Annual Leave",
+  "Work From Home",
+  "Paid Leave",
+  "Other",
 ];
 
-const LS_KEY = "hr_leave_requests_v1";
+const leaveModes = ["Full Day", "Half Day", "Permission"];
 
-// ---------------- HELPERS ----------------
+/* ===================== HELPERS ===================== */
+const normMode = (m) =>
+  String(m || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+const isHalfDay = (m) => normMode(m) === "half day";
+const isPermission = (m) => normMode(m) === "permission";
+const isFullDay = (m) => normMode(m) === "full day";
+const needsTime = (m) => isHalfDay(m) || isPermission(m);
+
+const shortTime = (t) => {
+  if (!t) return "";
+  const s = String(t);
+  return s.length >= 5 ? s.slice(0, 5) : s;
+};
+
+const calcDuration = (from, to) => {
+  if (!from || !to) return "";
+  const [fh, fm] = from.split(":").map(Number);
+  const [th, tm] = to.split(":").map(Number);
+  const diff = th * 60 + tm - (fh * 60 + fm);
+  if (diff <= 0) return "";
+  const h = Math.floor(diff / 60);
+  const m = diff % 60;
+  return `${h ? `${h} Hour${h > 1 ? "s" : ""}` : ""}${h && m ? " " : ""}${
+    m ? `${m} Minutes` : ""
+  }`;
+};
+
 const diffDaysInclusive = (from, to) => {
   const a = new Date(from);
   const b = new Date(to);
@@ -64,25 +62,25 @@ const diffDaysInclusive = (from, to) => {
 };
 
 const pill = (status) => {
-  const base = "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border";
-  if (status === "Approved") return `${base} bg-green-50 text-green-700 border-green-200`;
-  if (status === "Rejected") return `${base} bg-red-50 text-red-700 border-red-200`;
+  const base =
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border";
+  if (status === "Approved")
+    return `${base} bg-green-50 text-green-700 border-green-200`;
+  if (status === "Rejected")
+    return `${base} bg-red-50 text-red-700 border-red-200`;
   return `${base} bg-yellow-50 text-yellow-800 border-yellow-200`;
 };
 
-// for modal header (looks better on gradient)
-const pillDark = (status) => {
-  const base =
-    "inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border border-white/20 bg-white/15 text-white";
-  if (status === "Approved") return `${base}`;
-  if (status === "Rejected") return `${base}`;
-  return `${base}`;
-};
+const pillDark = () =>
+  "inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border border-white/20 bg-white/15 text-white";
 
 const roleBadge = (role) => {
-  const base = "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border";
-  if (role === "employee") return `${base} bg-blue-50 text-blue-700 border-blue-200`;
-  if (role === "admin") return `${base} bg-purple-50 text-purple-700 border-purple-200`;
+  const base =
+    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border";
+  if (role === "employee")
+    return `${base} bg-blue-50 text-blue-700 border-blue-200`;
+  if (role === "admin")
+    return `${base} bg-purple-50 text-purple-700 border-purple-200`;
   return `${base} bg-gray-50 text-gray-700 border-gray-200`; // hr
 };
 
@@ -101,57 +99,164 @@ const initials = (name = "") => {
   return (a + b).toUpperCase();
 };
 
-// ---------------- PAGE (HR VIEW) ----------------
-export default function LeaveManagement() {
-  // ✅ HR user (demo)
-  const currentHR = { id: "HR-001", name: "HR Manager" };
+/* ===================== UI bits ===================== */
+const TimePreset = ({ onMorning, onAfternoon }) => (
+  <div className="flex gap-2 flex-wrap">
+    <button
+      type="button"
+      onClick={onMorning}
+      className="px-3 py-1 text-xs border rounded-lg hover:bg-slate-50"
+    >
+      Morning (09:00 - 13:00)
+    </button>
+    <button
+      type="button"
+      onClick={onAfternoon}
+      className="px-3 py-1 text-xs border rounded-lg hover:bg-slate-50"
+    >
+      Afternoon (13:00 - 17:00)
+    </button>
+  </div>
+);
 
-  const [requests, setRequests] = useState(seedRequests);
+/* ===================== PAGE ===================== */
+export default function LeaveManagement() {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [managers, setManagers] = useState([]);
+  const [mgrError, setMgrError] = useState("");
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("All");
-  const [sourceFilter, setSourceFilter] = useState("All"); // All | employee | admin | hr
+  const [sourceFilter, setSourceFilter] = useState("All");
   const [search, setSearch] = useState("");
 
   // View modal
   const [viewing, setViewing] = useState(null);
   const [decisionNote, setDecisionNote] = useState("");
 
-  // Apply Leave (HR) modal
+  // Apply modal
   const [showApply, setShowApply] = useState(false);
-  const [applyForRole, setApplyForRole] = useState("employee");
-  const [applyOwnerId, setApplyOwnerId] = useState("EMP-003");
-  const [applyOwnerName, setApplyOwnerName] = useState("New Employee");
+
+  // Apply fields
   const [applyLeaveType, setApplyLeaveType] = useState("Casual Leave");
+  const [applyMode, setApplyMode] = useState("Full Day");
   const [applyFrom, setApplyFrom] = useState("");
   const [applyTo, setApplyTo] = useState("");
+  const [applyFromTime, setApplyFromTime] = useState("");
+  const [applyToTime, setApplyToTime] = useState("");
   const [applyReason, setApplyReason] = useState("");
 
-  // ---------------- LocalStorage ----------------
+  /* ---------------- FETCH MANAGERS ---------------- */
+  const fetchManagers = async () => {
+    setMgrError("");
+    const { data, error } = await supabase
+      .from(APPROVERS_TABLE)
+      .select("id,name,email,role,access,active")
+      .eq("active", true)
+      .eq("role", "manager")
+      .order("name", { ascending: true });
+
+    if (error) {
+      setManagers([]);
+      setMgrError(error.message);
+      return;
+    }
+
+    const list = (data || []).map((r) => ({
+      id: String(r.id),
+      name: String(r.name || ""),
+      email: r.email ? String(r.email) : "",
+      access: String(r.access || ""), // approver / viewer
+    }));
+
+    setManagers(list);
+  };
+
+  /* ---------------- FETCH REQUESTS ---------------- */
+  const fetchRequests = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from(LEAVES_TABLE)
+      .select("*")
+      .order("applied_at", { ascending: false });
+
+    if (error) {
+      console.warn(error.message);
+      setRequests([]);
+      setLoading(false);
+      return;
+    }
+
+    const mapped = (data || []).map((r) => {
+      const mode = (r.mode ?? "").toString();
+      const fromDate = r.from_date;
+      const toDate = r.to_date || r.from_date; // ✅ safe fallback
+
+      // NOTE: time_from/time_to might come as "09:00:00" or "09:00:00+00"
+      const tf = shortTime(r.time_from);
+      const tt = shortTime(r.time_to);
+
+      return {
+        id: r.id,
+        ownerRole: r.owner_role,
+        ownerId: r.owner_id,
+        ownerName: r.owner_name,
+
+        requestToId: r.request_to_id,
+        requestToName: r.request_to_name || "",
+        requestToRole: r.request_to_role || "",
+
+        leaveType: r.leave_type,
+        mode,
+        from: fromDate,
+        to: toDate,
+        timeFrom: tf,
+        timeTo: tt,
+        hours: r.hours || (needsTime(mode) ? calcDuration(tf, tt) : null),
+
+        reason: r.reason,
+        status: r.status,
+        appliedAt: r.applied_at,
+
+        decisionNote: r.decision_note || "",
+        decidedAt: r.decided_at || "",
+        decidedBy: r.decided_by_name || "",
+      };
+    });
+
+    setRequests(mapped);
+    setLoading(false);
+  };
+
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY);
-      if (saved) setRequests(JSON.parse(saved));
-      else localStorage.setItem(LS_KEY, JSON.stringify(seedRequests));
-    } catch {}
+    (async () => {
+      await fetchManagers();
+      await fetchRequests();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(requests));
-    } catch {}
-  }, [requests]);
-
-  // ESC close for view modal
-  useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") setViewing(null);
+      if (e.key === "Escape") {
+        setViewing(null);
+        setShowApply(false);
+      }
     };
-    if (viewing) window.addEventListener("keydown", onKey);
+    if (viewing || showApply) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [viewing]);
+  }, [viewing, showApply]);
 
-  // ---------------- Derived Lists ----------------
+  /* ✅ IMPORTANT: keep To = From when Half Day / Permission */
+  useEffect(() => {
+    if (needsTime(applyMode) && applyFrom) {
+      setApplyTo(applyFrom);
+    }
+  }, [applyMode, applyFrom]);
+
+  /* ---------------- Derived ---------------- */
   const filtered = useMemo(() => {
     let list = [...requests];
 
@@ -162,15 +267,14 @@ export default function LeaveManagement() {
     if (q) {
       list = list.filter(
         (r) =>
-          r.id.toLowerCase().includes(q) ||
-          r.ownerName.toLowerCase().includes(q) ||
-          r.ownerId.toLowerCase().includes(q) ||
-          r.leaveType.toLowerCase().includes(q) ||
-          r.reason.toLowerCase().includes(q)
+          String(r.id).toLowerCase().includes(q) ||
+          (r.ownerName || "").toLowerCase().includes(q) ||
+          (r.ownerId || "").toLowerCase().includes(q) ||
+          (r.leaveType || "").toLowerCase().includes(q) ||
+          (r.reason || "").toLowerCase().includes(q) ||
+          (r.requestToName || "").toLowerCase().includes(q)
       );
     }
-
-    list.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
     return list;
   }, [requests, statusFilter, sourceFilter, search]);
 
@@ -182,7 +286,14 @@ export default function LeaveManagement() {
     return { total, pending, approved, rejected };
   }, [requests]);
 
-  // ---------------- Actions ----------------
+  const managerLabel = useMemo(() => {
+    if (managers.length === 0) return "Manager";
+    return managers
+      .map((m) => `${m.name}${m.access === "viewer" ? " (viewer)" : " (approver)"}`)
+      .join(", ");
+  }, [managers]);
+
+  /* ---------------- Actions ---------------- */
   const openView = (req) => {
     setViewing(req);
     setDecisionNote(req.decisionNote || "");
@@ -193,72 +304,107 @@ export default function LeaveManagement() {
     setDecisionNote("");
   };
 
-  const updateStatus = (id, nextStatus) => {
-    setRequests((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-        return {
-          ...r,
-          status: nextStatus,
-          decisionNote: decisionNote?.trim() || "",
-          decidedAt: new Date().toISOString().slice(0, 10),
-          decidedBy: currentHR.name,
-        };
-      })
-    );
-    closeView();
-  };
-
-  const closeApply = () => setShowApply(false);
-
-  const submitApply = () => {
-    if (!applyOwnerName.trim() || !applyOwnerId.trim()) {
-      alert("Owner Name and Owner ID required.");
-      return;
-    }
-    if (!applyFrom || !applyTo || !applyReason.trim()) {
-      alert("Please fill From, To and Reason.");
-      return;
-    }
-    if (new Date(applyTo) < new Date(applyFrom)) {
-      alert("To date cannot be earlier than From date.");
-      return;
-    }
-
-    const newReq = {
-      id: `LR-${Math.floor(1000 + Math.random() * 9000)}`,
-      ownerRole: applyForRole,
-      ownerId: applyOwnerId.trim(),
-      ownerName: applyOwnerName.trim(),
-      leaveType: applyLeaveType,
-      from: applyFrom,
-      to: applyTo,
-      reason: applyReason.trim(),
-      status: "Pending",
-      appliedAt: new Date().toISOString(),
-      decisionNote: "",
-      decidedAt: "",
-      decidedBy: "",
+  const updateStatus = async (row, nextStatus) => {
+    const payload = {
+      status: nextStatus,
+      decision_note: decisionNote?.trim() || "",
+      decided_at: new Date().toISOString().slice(0, 10),
+      decided_by_id: currentHR.id,
+      decided_by_name: currentHR.name,
     };
 
-    setRequests((prev) => [newReq, ...prev]);
+    const { error } = await supabase.from(LEAVES_TABLE).update(payload).eq("id", row.id);
+    if (error) return alert(error.message);
+
+    closeView();
+    fetchRequests();
+  };
+
+  /* ---------------- APPLY ---------------- */
+  const submitApply = async () => {
+    if (!applyLeaveType) return alert("Leave Type required.");
+    if (!applyFrom) return alert("From date required.");
+    if (!applyReason.trim()) return alert("Reason required.");
+
+    // ✅ Full day needs To, Half/Permission => To = From (auto)
+    const uiTo = needsTime(applyMode) ? applyFrom : applyTo;
+    if (!uiTo) return alert("To date required.");
+    if (!needsTime(applyMode) && new Date(uiTo) < new Date(applyFrom))
+      return alert("To date cannot be earlier than From date.");
+
+    if (needsTime(applyMode)) {
+      if (!applyFromTime || !applyToTime)
+        return alert("Time From/To required for Half Day / Permission.");
+      const dur = calcDuration(applyFromTime, applyToTime);
+      if (!dur) return alert("Invalid time range.");
+    }
+
+    if (managers.length === 0) {
+      return alert("Managers list empty. Add managers in hrmss_approvers table (role=manager).");
+    }
+
+    const approverMgr = managers.find((m) => m.access === "approver");
+    const viewerMgrs = managers.filter((m) => m.access === "viewer");
+    if (!approverMgr) return alert("No approver manager found. Set Arun as access='approver'.");
+
+    const toDateForDB = isFullDay(applyMode) ? uiTo : applyFrom;
+
+    const tf = needsTime(applyMode) ? shortTime(applyFromTime) : null;
+    const tt = needsTime(applyMode) ? shortTime(applyToTime) : null;
+
+    const common = {
+      owner_role: "hr",
+      owner_id: currentHR.id,
+      owner_name: currentHR.name,
+
+      request_to_role: "manager",
+
+      leave_type: applyLeaveType,
+      mode: applyMode,
+
+      from_date: applyFrom,
+      to_date: toDateForDB,
+
+      time_from: tf,
+      time_to: tt,
+      hours: needsTime(applyMode) ? calcDuration(tf, tt) : null,
+
+      reason: applyReason.trim(),
+      status: "Pending",
+    };
+
+    // ✅ send to BOTH (approver + viewer) -> 2 rows
+    const rowsToInsert = [
+      { ...common, request_to_id: approverMgr.id, request_to_name: approverMgr.name },
+      ...viewerMgrs.map((v) => ({ ...common, request_to_id: v.id, request_to_name: v.name })),
+    ];
+
+    const { error } = await supabase.from(LEAVES_TABLE).insert(rowsToInsert);
+    if (error) return alert(error.message);
 
     setApplyLeaveType("Casual Leave");
+    setApplyMode("Full Day");
     setApplyFrom("");
     setApplyTo("");
+    setApplyFromTime("");
+    setApplyToTime("");
     setApplyReason("");
     setShowApply(false);
 
-    alert("Leave request submitted!");
+    fetchRequests();
+    alert("Leave request sent to Managers!");
   };
 
+  /* ===================== UI ===================== */
   return (
     <section className="space-y-4">
       {/* Header */}
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900">Leave Management</h1>
-          <p className="text-sm text-gray-600">HR can view all leave requests and approve/reject them.</p>
+          <p className="text-sm text-gray-600">
+            HR can view all leave requests and approve/reject them. HR can also apply leave to Managers.
+          </p>
         </div>
 
         <button
@@ -339,15 +485,21 @@ export default function LeaveManagement() {
             <tr>
               <th className="text-left px-4 py-3 font-medium">Request</th>
               <th className="text-left px-4 py-3 font-medium">Owner</th>
-              <th className="text-left px-4 py-3 font-medium">Dates</th>
-              <th className="text-left px-4 py-3 font-medium">Days</th>
+              <th className="text-left px-4 py-3 font-medium">Mode</th>
+              <th className="text-left px-4 py-3 font-medium">Dates / Time</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
               <th className="text-right px-4 py-3 font-medium">Action</th>
             </tr>
           </thead>
 
           <tbody className="divide-y">
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td className="px-4 py-10 text-center text-gray-500" colSpan={6}>
+                  Loading...
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td className="px-4 py-10 text-center text-gray-500" colSpan={6}>
                   No leave requests found.
@@ -356,33 +508,66 @@ export default function LeaveManagement() {
             ) : (
               filtered.map((r) => {
                 const { date, time } = fmtDT(r.appliedAt);
+
+                const tf = shortTime(r.timeFrom);
+                const tt = shortTime(r.timeTo);
+
+                // ✅ If Half Day / Permission -> always show time row (with placeholder)
+                const showTimeForThis = needsTime(r.mode);
+
                 return (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="font-semibold">{r.leaveType}</div>
                       <div className="text-xs text-gray-500">
-                        #{r.id} • Applied: {date} {time}
+                        #{String(r.id).slice(0, 8)} • Applied: {date} {time}
                       </div>
                       <div className="text-xs text-gray-600 mt-1">{r.reason}</div>
+
+                      <div className="text-xs text-gray-500 mt-2">
+                        <span className="font-semibold text-gray-700">Request To:</span>{" "}
+                        <span className="font-semibold">Manager</span>{" "}
+                        <span className="text-gray-500">• {r.requestToName || "-"}</span>
+                      </div>
                     </td>
 
                     <td className="px-4 py-3">
                       <div className="font-semibold text-gray-800">{r.ownerName}</div>
                       <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
                         <span className={roleBadge(r.ownerRole)}>
-                          {r.ownerRole === "employee" ? "Employee" : r.ownerRole === "admin" ? "Admin" : "HR"}
+                          {r.ownerRole === "employee"
+                            ? "Employee"
+                            : r.ownerRole === "admin"
+                            ? "Admin"
+                            : "HR"}
                         </span>
                         <span>{r.ownerId}</span>
                       </div>
                     </td>
 
                     <td className="px-4 py-3">
+                      <div className="font-semibold text-gray-800">{r.mode}</div>
+                      {r.hours ? (
+                        <div className="text-xs text-gray-500 mt-1">⏱ {r.hours}</div>
+                      ) : null}
+                    </td>
+
+                    <td className="px-4 py-3">
                       <div className="text-gray-700">
                         {r.from} → {r.to}
                       </div>
-                    </td>
 
-                    <td className="px-4 py-3">{diffDaysInclusive(r.from, r.to)}</td>
+                      {showTimeForThis ? (
+                        <div className="text-xs text-gray-700 mt-1">
+                          Time: <span className="font-semibold">{tf || "--:--"}</span> →{" "}
+                          <span className="font-semibold">{tt || "--:--"}</span>
+                        </div>
+                      ) : null}
+
+                      <div className="text-xs text-gray-500 mt-1">
+                        Days: {diffDaysInclusive(r.from, r.to)}
+                      </div>
+                    </td>
 
                     <td className="px-4 py-3">
                       <span className={pill(r.status)}>{r.status}</span>
@@ -412,115 +597,182 @@ export default function LeaveManagement() {
         </table>
       </div>
 
-      {/* Apply Leave Modal (unchanged) */}
+      {/* ===================== Apply Leave Modal ===================== */}
       {showApply && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg border overflow-hidden">
-            <div className="p-5 border-b flex items-start justify-between">
-              <div>
-                <div className="text-lg font-semibold">Apply Leave</div>
-                <div className="text-xs text-gray-500 mt-1">Create a leave request (demo)</div>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowApply(false);
+          }}
+        >
+          <div className="w-full max-w-2xl max-h-[90vh] bg-white rounded-2xl shadow-2xl ring-1 ring-slate-200 overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="shrink-0 bg-gradient-to-r from-purple-700 via-indigo-600 to-sky-500 text-white px-5 py-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Apply Leave</p>
+                <div className="mt-1 text-lg font-semibold">Request To: Manager</div>
+                <div className="text-xs text-white/80 mt-1">Will be sent to approver + viewer</div>
               </div>
-              <button type="button" onClick={closeApply} className="text-gray-500 hover:text-gray-700 text-sm">
-                ✕
+
+              <button
+                type="button"
+                onClick={() => setShowApply(false)}
+                className="rounded-xl border border-white/20 bg-white/10 p-2 hover:bg-white/15"
+                aria-label="Close"
+              >
+                <X size={18} className="text-white" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-sm">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Request For</label>
-                  <select
-                    value={applyForRole}
-                    onChange={(e) => setApplyForRole(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
-                  >
-                    <option value="employee">Employee</option>
-                    <option value="admin">Admin</option>
-                    <option value="hr">HR</option>
-                  </select>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+              <div className="rounded-xl border border-slate-200 p-3 bg-slate-50">
+                <div className="text-xs text-slate-500">Request To</div>
+                <div className="font-semibold text-slate-900">Manager</div>
+                <div className="text-xs text-slate-700 mt-1">
+                  {managers.length ? managerLabel : "No managers found"}
                 </div>
-
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Leave Type</label>
-                  <select
-                    value={applyLeaveType}
-                    onChange={(e) => setApplyLeaveType(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
-                  >
-                    <option>Casual Leave</option>
-                    <option>Sick Leave</option>
-                    <option>Paid Leave</option>
-                  </select>
-                </div>
+                {mgrError ? (
+                  <div className="text-xs text-rose-600 mt-2">Managers fetch error: {mgrError}</div>
+                ) : null}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Owner Name</label>
-                  <input
-                    value={applyOwnerName}
-                    onChange={(e) => setApplyOwnerName(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
-                    placeholder="Name"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Owner ID</label>
-                  <input
-                    value={applyOwnerId}
-                    onChange={(e) => setApplyOwnerId(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
-                    placeholder="EMP-xxx / ADM-xxx / HR-xxx"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs text-slate-600 mb-1">Leave Type</label>
+                <select
+                  value={applyLeaveType}
+                  onChange={(e) => setApplyLeaveType(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                >
+                  {leaveTypes.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
               </div>
 
+              <div>
+                <label className="block text-xs text-slate-600 mb-1">Mode</label>
+                <select
+                  value={applyMode}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setApplyMode(next);
+
+                    // ✅ Full Day -> clear time, Half/Permission -> keep time section
+                    if (!needsTime(next)) {
+                      setApplyFromTime("");
+                      setApplyToTime("");
+                    } else {
+                      // ✅ Half/Permission -> To always equals From
+                      if (applyFrom) setApplyTo(applyFrom);
+                    }
+                  }}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                >
+                  {leaveModes.map((m) => (
+                    <option key={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* From & To calendar always */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">From</label>
+                  <label className="block text-xs text-slate-600 mb-1">From</label>
                   <input
                     type="date"
                     value={applyFrom}
-                    onChange={(e) => setApplyFrom(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setApplyFrom(v);
+                      if (needsTime(applyMode)) setApplyTo(v); // ✅ auto sync
+                    }}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">To</label>
+                  <label className="block text-xs text-slate-600 mb-1">To</label>
                   <input
                     type="date"
                     value={applyTo}
                     onChange={(e) => setApplyTo(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                    disabled={needsTime(applyMode)} // ✅ still visible, but locked
+                    className={`w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400 ${
+                      needsTime(applyMode) ? "bg-slate-100 cursor-not-allowed" : ""
+                    }`}
                   />
+                  {needsTime(applyMode) ? (
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Half Day / Permission: To date is same as From date.
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
+              {/* ✅ Half Day / Permission -> time MUST show */}
+              {needsTime(applyMode) && (
+                <div className="space-y-2">
+                  <TimePreset
+                    onMorning={() => {
+                      setApplyFromTime("09:00");
+                      setApplyToTime("13:00");
+                    }}
+                    onAfternoon={() => {
+                      setApplyFromTime("13:00");
+                      setApplyToTime("17:00");
+                    }}
+                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">Time From</label>
+                      <input
+                        type="time"
+                        value={applyFromTime}
+                        onChange={(e) => setApplyFromTime(e.target.value)}
+                        required
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">Time To</label>
+                      <input
+                        type="time"
+                        value={applyToTime}
+                        onChange={(e) => setApplyToTime(e.target.value)}
+                        required
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                      />
+                    </div>
+                  </div>
+
+                  {calcDuration(shortTime(applyFromTime), shortTime(applyToTime)) ? (
+                    <div className="text-sm bg-slate-50 border border-slate-200 rounded-xl p-2">
+                      ⏱ Duration:{" "}
+                      <b>{calcDuration(shortTime(applyFromTime), shortTime(applyToTime))}</b>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Reason</label>
+                <label className="block text-xs text-slate-600 mb-1">Reason</label>
                 <textarea
                   rows={4}
                   value={applyReason}
                   onChange={(e) => setApplyReason(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
                   placeholder="Write reason..."
                 />
               </div>
-
-              <div className="rounded-xl border p-3 bg-gray-50">
-                <div className="text-xs text-gray-500">Logged in HR</div>
-                <div className="font-semibold text-gray-800">
-                  {currentHR.name} • {currentHR.id}
-                </div>
-              </div>
             </div>
 
-            <div className="p-5 border-t flex items-center justify-end gap-2">
+            {/* Footer */}
+            <div className="shrink-0 border-t bg-white px-5 py-4 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={closeApply}
+                onClick={() => setShowApply(false)}
                 className="px-4 py-2 rounded-xl text-sm border bg-white hover:bg-gray-50"
               >
                 Cancel
@@ -528,16 +780,16 @@ export default function LeaveManagement() {
               <button
                 type="button"
                 onClick={submitApply}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-purple-700 text-white hover:bg-purple-800"
+                className="px-5 py-2 rounded-xl text-sm font-semibold bg-purple-700 text-white hover:bg-purple-800"
               >
-                Submit
+                Apply
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ✅ HR VIEW MODAL (NOW SAME STYLE AS YOUR CLEAN PREMIUM LETTER MODAL) */}
+      {/* ===================== View Modal ===================== */}
       {viewing && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
@@ -546,13 +798,12 @@ export default function LeaveManagement() {
           }}
         >
           <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 overflow-hidden">
-            {/* Header */}
             <div className="bg-gradient-to-r from-purple-700 via-indigo-600 to-sky-500 text-white px-4 py-3 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Leave request</p>
                 <div className="mt-1 flex items-center gap-2 flex-wrap">
-                  <span className="text-lg font-semibold">#{viewing.id}</span>
-                  <span className={pillDark(viewing.status)}>{viewing.status}</span>
+                  <span className="text-lg font-semibold">#{String(viewing.id).slice(0, 8)}</span>
+                  <span className={pillDark()}>{viewing.status}</span>
                 </div>
               </div>
 
@@ -566,9 +817,7 @@ export default function LeaveManagement() {
               </button>
             </div>
 
-            {/* Body */}
             <div className="p-4 space-y-3 text-sm">
-              {/* Owner row */}
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center text-xs font-bold">
                   {initials(viewing.ownerName)}
@@ -577,52 +826,49 @@ export default function LeaveManagement() {
                   <p className="font-semibold text-slate-900 truncate">{viewing.ownerName}</p>
                   <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                     <span className={roleBadge(viewing.ownerRole)}>
-                      {viewing.ownerRole === "employee" ? "Employee" : viewing.ownerRole === "admin" ? "Admin" : "HR"}
+                      {viewing.ownerRole === "employee"
+                        ? "Employee"
+                        : viewing.ownerRole === "admin"
+                        ? "Admin"
+                        : "HR"}
                     </span>
                     <span className="text-xs text-slate-500">{viewing.ownerId}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Tags */}
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
-                  {viewing.leaveType}
-                </span>
-                <span className={pill(viewing.status)}>{viewing.status}</span>
+              <div className="rounded-xl bg-white border border-slate-100 p-3">
+                <p className="text-[11px] text-slate-500">Request To</p>
+                <p className="mt-1 font-semibold text-slate-900">Manager • {viewing.requestToName || "-"}</p>
               </div>
 
-              {/* Dates + Days */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
-                  <p className="text-[11px] text-slate-500">From</p>
-                  <p className="font-semibold text-slate-900">{viewing.from}</p>
-                </div>
-                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
-                  <p className="text-[11px] text-slate-500">To</p>
-                  <p className="font-semibold text-slate-900">{viewing.to}</p>
-                </div>
+              <div className="rounded-xl bg-white border border-slate-100 p-3">
+                <p className="text-[11px] text-slate-500">Leave</p>
+                <p className="mt-1 font-semibold text-slate-900">
+                  {viewing.leaveType} • {viewing.mode}
+                </p>
+                <p className="mt-2 text-slate-800">
+                  {viewing.from} → {viewing.to}{" "}
+                  <span className="text-xs text-slate-500 ml-2">
+                    ({diffDaysInclusive(viewing.from, viewing.to)} day(s))
+                  </span>
+                </p>
+
+                {/* ✅ Half Day/Permission -> always show time line */}
+                {needsTime(viewing.mode) ? (
+                  <p className="text-xs text-slate-700 mt-1">
+                    Time: <span className="font-semibold">{shortTime(viewing.timeFrom) || "--:--"}</span> →{" "}
+                    <span className="font-semibold">{shortTime(viewing.timeTo) || "--:--"}</span>
+                    {viewing.hours ? <span className="text-slate-500"> • {viewing.hours}</span> : null}
+                  </p>
+                ) : null}
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
-                  <p className="text-[11px] text-slate-500">Days</p>
-                  <p className="font-semibold text-slate-900">{diffDaysInclusive(viewing.from, viewing.to)}</p>
-                </div>
-                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
-                  <p className="text-[11px] text-slate-500">Applied</p>
-                  <p className="font-semibold text-slate-900">{fmtDT(viewing.appliedAt).date}</p>
-                  <p className="text-[11px] text-slate-500">{fmtDT(viewing.appliedAt).time}</p>
-                </div>
-              </div>
-
-              {/* Reason */}
               <div className="rounded-xl bg-white border border-slate-100 p-3">
                 <p className="text-[11px] text-slate-500">Reason</p>
                 <p className="mt-1 text-slate-800 leading-relaxed">{viewing.reason || "-"}</p>
               </div>
 
-              {/* HR note */}
               <div className="rounded-xl bg-white border border-slate-100 p-3">
                 <p className="text-[11px] text-slate-500">HR Note (optional)</p>
                 <textarea
@@ -634,7 +880,6 @@ export default function LeaveManagement() {
                 />
               </div>
 
-              {/* Decision info */}
               {viewing.decidedAt && (
                 <div className="rounded-xl bg-white border border-slate-100 p-3">
                   <p className="text-[11px] text-slate-500">Decision</p>
@@ -646,7 +891,6 @@ export default function LeaveManagement() {
               )}
             </div>
 
-            {/* Footer actions */}
             <div className="px-4 py-3 border-t flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -660,7 +904,7 @@ export default function LeaveManagement() {
                 <button
                   type="button"
                   disabled={viewing.status !== "Pending"}
-                  onClick={() => updateStatus(viewing.id, "Rejected")}
+                  onClick={() => updateStatus(viewing, "Rejected")}
                   className={`px-4 py-2 rounded-xl text-sm font-semibold border transition ${
                     viewing.status !== "Pending"
                       ? "opacity-50 cursor-not-allowed bg-white text-gray-500"
@@ -673,7 +917,7 @@ export default function LeaveManagement() {
                 <button
                   type="button"
                   disabled={viewing.status !== "Pending"}
-                  onClick={() => updateStatus(viewing.id, "Approved")}
+                  onClick={() => updateStatus(viewing, "Approved")}
                   className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
                     viewing.status !== "Pending"
                       ? "opacity-50 cursor-not-allowed bg-gray-200 text-gray-600"

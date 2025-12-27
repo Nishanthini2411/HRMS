@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { Bell, UserRound } from "lucide-react";
+import { Bell, Menu, UserRound } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
@@ -12,7 +12,7 @@ const linkClasses = ({ isActive }) =>
       : "text-gray-700 hover:bg-blue-50 hover:text-blue-700"
   }`;
 
-const Navbar = () => {
+const Navbar = ({ isSidebarOpen = true, onToggleSidebar }) => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -29,7 +29,18 @@ const Navbar = () => {
 
   return (
     <header className="h-14 bg-white border-b flex items-center justify-between px-6">
-      <h2 className="text-lg font-semibold text-gray-800">Admin Dashboard</h2>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50"
+          aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+          title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+        >
+          <Menu size={18} />
+        </button>
+        <h2 className="text-lg font-semibold text-gray-800">Admin Dashboard</h2>
+      </div>
       <div className="flex items-center gap-3 text-sm">
         <NavLink to="/dashboard/notifications" className={linkClasses}>
           <Bell size={16} />

@@ -526,10 +526,12 @@ export default function AdminProfile() {
       </div>
 
       <DocumentManager
-        title="My Documents"
-        subtitle="Upload and access your admin documents from your profile"
-        accent="blue"
-      />
+  title="My Documents"
+  subtitle="Upload and access your admin documents"
+  accent="blue"
+  role="admin"
+/>
+
 
       <Divider label="End of Profile" />
 

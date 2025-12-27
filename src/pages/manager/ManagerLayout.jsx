@@ -7,6 +7,7 @@ import {
   Home,
   LayoutPanelTop,
   LogOut,
+  Menu,
   Shield,
   User,
   UserCircle2,
@@ -44,6 +45,7 @@ export default function ManagerLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [session, setSession] = useState(getManagerSession());
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
     if (localStorage.getItem("hrmss.signin.completed.manager") !== "true") {
@@ -59,19 +61,38 @@ export default function ManagerLayout() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-[280px] bg-gradient-to-b from-slate-900 to-indigo-900 text-white sticky top-0 h-screen">
-        <div className="h-full flex flex-col">
-          <div className="p-5 border-b border-white/10">
-            <div className="text-xl font-extrabold">Manager</div>
-            <div className="text-xs text-indigo-100/90 mt-1 flex items-center gap-2">
-              <Shield size={14} />
-              {approver ? "Can approve leaves" : "View-only"}
+      <aside
+        className={`bg-gradient-to-b from-slate-900 to-indigo-900 text-white sticky top-0 h-screen overflow-hidden transition-all duration-200 ${
+          isSidebarOpen ? "w-[280px]" : "w-0"
+        }`}
+      >
+        <div
+          className={`h-full flex flex-col transition-opacity duration-200 ${
+            isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="p-5 border-b border-white/10 flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xl font-extrabold">Manager</div>
+              <div className="text-xs text-indigo-100/90 mt-1 flex items-center gap-2">
+                <Shield size={14} />
+                {approver ? "Can approve leaves" : "View-only"}
+              </div>
+              <div className="mt-2 rounded-xl bg-white/10 p-3 text-sm space-y-1">
+                <p className="font-semibold">{session.name}</p>
+                <p className="text-indigo-100">{session.email || session.id}</p>
+                <p className="text-[11px] uppercase tracking-wide text-indigo-200">Team: {session.team || "-"}</p>
+              </div>
             </div>
-            <div className="mt-2 rounded-xl bg-white/10 p-3 text-sm space-y-1">
-              <p className="font-semibold">{session.name}</p>
-              <p className="text-indigo-100">{session.email || session.id}</p>
-              <p className="text-[11px] uppercase tracking-wide text-indigo-200">Team: {session.team || "—"}</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-white shadow-sm hover:bg-white/20"
+              aria-label="Hide sidebar"
+              title="Hide sidebar"
+            >
+              <Menu size={18} />
+            </button>
           </div>
 
           <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
@@ -96,6 +117,15 @@ export default function ManagerLayout() {
           <div className="px-6 py-4 flex flex-col gap-1">
             <div className="text-xs uppercase tracking-wide text-slate-500">Manager Portal</div>
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen((open) => !open)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+                aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+                title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              >
+                <Menu size={18} />
+              </button>
               <p className="text-lg font-bold text-slate-900">Control Center</p>
               <span className="text-xs text-indigo-700 bg-indigo-100 px-2 py-1 rounded-full inline-flex items-center gap-1">
                 <BarChart3 size={14} /> Real-time overview

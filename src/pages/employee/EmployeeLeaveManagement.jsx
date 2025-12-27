@@ -21,7 +21,14 @@ const tone = {
   Rejected: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
-const fmt = (iso) => new Date(iso).toLocaleString();
+const fmt = (iso) => {
+  if (!iso) return "-";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return String(iso);
+  }
+};
 
 const calcDuration = (from, to) => {
   if (!from || !to) return "";
@@ -31,10 +38,20 @@ const calcDuration = (from, to) => {
   if (diff <= 0) return "";
   const h = Math.floor(diff / 60);
   const m = diff % 60;
-  return `${h ? `${h} Hour${h > 1 ? "s" : ""}` : ""}${h && m ? " " : ""}${m ? `${m} Minutes` : ""}`;
+  return `${h ? `${h} Hour${h > 1 ? "s" : ""}` : ""}${h && m ? " " : ""}${
+    m ? `${m} Minutes` : ""
+  }`;
 };
 
 const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
+
+/* ---------------- APPROVER TABLE (Request To) ----------------
+  ✅ We will fetch approvers ONLY from this table:
+  public.hrmss_approvers
+  Columns expected: id, name, role, access, active
+  We show only: access='approver' AND active=true
+*/
+const APPROVER_TABLE = "hrmss_approvers";
 
 /* ---------------- MODAL ---------------- */
 const ModalShell = ({ title, onClose, children }) => (
@@ -51,15 +68,40 @@ const ModalShell = ({ title, onClose, children }) => (
   </div>
 );
 
+const TimePreset = ({ onMorning, onAfternoon }) => (
+  <div className="flex gap-2">
+    <button
+      type="button"
+      onClick={onMorning}
+      className="px-3 py-1 text-xs border rounded"
+    >
+      Morning (09:00 - 13:00)
+    </button>
+    <button
+      type="button"
+      onClick={onAfternoon}
+      className="px-3 py-1 text-xs border rounded"
+    >
+      Afternoon (13:00 - 17:00)
+    </button>
+  </div>
+);
+
 /* ---------------- MAIN ---------------- */
 export default function EmployeeLeaveManagement() {
   const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const [viewId, setViewId] = useState(null);
   const [editId, setEditId] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
 
+  // approvers (request-to)
+  const [approvers, setApprovers] = useState([]);
+  const [approverError, setApproverError] = useState("");
+
   /* CREATE */
+  const [cRequestToId, setCRequestToId] = useState("");
   const [cType, setCType] = useState("Casual Leave");
   const [cMode, setCMode] = useState("Full Day");
   const [cFrom, setCFrom] = useState("");
@@ -69,6 +111,7 @@ export default function EmployeeLeaveManagement() {
   const [cReason, setCReason] = useState("");
 
   /* EDIT */
+  const [eRequestToId, setERequestToId] = useState("");
   const [eType, setEType] = useState("");
   const [eMode, setEMode] = useState("");
   const [eFrom, setEFrom] = useState("");
@@ -80,8 +123,39 @@ export default function EmployeeLeaveManagement() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
 
-  /* ---------------- FETCH ---------------- */
+  /* ---------------- FETCH APPROVERS ---------------- */
+  const fetchApprovers = async () => {
+    setApproverError("");
+
+    const { data, error } = await supabase
+      .from(APPROVER_TABLE)
+      .select("id,name,role,access,active")
+      .eq("active", true)
+      .eq("access", "approver")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.warn("Approver fetch error:", error.message);
+      setApprovers([]);
+      setApproverError(error.message);
+      return;
+    }
+
+    const list = (data || [])
+      .map((r) => ({
+        id: String(r.id),
+        name: String(r.name),
+        role: String(r.role || ""),
+      }))
+      .filter((x) => x.id && x.name);
+
+    setApprovers(list);
+  };
+
+  /* ---------------- FETCH LEAVES ---------------- */
   const fetchLeaves = async () => {
+    setLoading(true);
+
     const { data, error } = await supabase
       .from("employee_leaves")
       .select("*")
@@ -90,11 +164,12 @@ export default function EmployeeLeaveManagement() {
 
     if (error) {
       alert(error.message);
+      setLoading(false);
       return;
     }
 
     setRows(
-      data.map((r) => ({
+      (data || []).map((r) => ({
         id: r.id,
         leaveType: r.leave_type,
         mode: r.mode,
@@ -106,12 +181,23 @@ export default function EmployeeLeaveManagement() {
         reason: r.reason,
         status: r.status,
         appliedAt: r.applied_at,
+
+        // request-to / approver
+        requestToId: r.request_to_id,
+        requestToName: r.request_to_name,
+        requestToRole: r.request_to_role,
       }))
     );
+
+    setLoading(false);
   };
 
   useEffect(() => {
-    fetchLeaves();
+    (async () => {
+      await fetchApprovers();
+      await fetchLeaves();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ---------------- STATS ---------------- */
@@ -132,8 +218,9 @@ export default function EmployeeLeaveManagement() {
       const q = search.toLowerCase();
       list = list.filter(
         (r) =>
-          r.leaveType.toLowerCase().includes(q) ||
-          r.mode.toLowerCase().includes(q)
+          (r.leaveType || "").toLowerCase().includes(q) ||
+          (r.mode || "").toLowerCase().includes(q) ||
+          (r.requestToName || "").toLowerCase().includes(q)
       );
     }
     return list;
@@ -142,35 +229,64 @@ export default function EmployeeLeaveManagement() {
   const selectedView = rows.find((r) => r.id === viewId);
   const selectedEdit = rows.find((r) => r.id === editId);
 
+  const selectedCreateApprover = useMemo(
+    () => approvers.find((a) => a.id === cRequestToId),
+    [approvers, cRequestToId]
+  );
+  const selectedEditApprover = useMemo(
+    () => approvers.find((a) => a.id === eRequestToId),
+    [approvers, eRequestToId]
+  );
+
   /* ---------------- CREATE ---------------- */
   const createLeave = async (e) => {
     e.preventDefault();
 
+    if (!cRequestToId) {
+      alert("Please select Request To (approver).");
+      return;
+    }
+
     const payload = {
       employee_id: EMP.id,
       employee_name: EMP.name,
+
       leave_type: cType,
       mode: cMode,
       from_date: cFrom,
       to_date: cMode === "Full Day" ? cTo : cFrom,
+
       time_from: needsTime(cMode) ? cFromTime : null,
       time_to: needsTime(cMode) ? cToTime : null,
       hours: needsTime(cMode) ? calcDuration(cFromTime, cToTime) : null,
+
       reason: cReason,
       status: "Pending",
+
+      // ✅ request-to saved in DB
+      request_to_id: selectedCreateApprover?.id ?? cRequestToId,
+      request_to_name: selectedCreateApprover?.name ?? null,
+      request_to_role: selectedCreateApprover?.role ?? null,
     };
 
     const { error } = await supabase.from("employee_leaves").insert(payload);
     if (error) return alert(error.message);
 
     setCreateOpen(false);
-    setCFrom(""); setCTo(""); setCFromTime(""); setCToTime(""); setCReason("");
+    setCRequestToId("");
+    setCFrom("");
+    setCTo("");
+    setCFromTime("");
+    setCToTime("");
+    setCReason("");
     fetchLeaves();
   };
 
   /* ---------------- EDIT ---------------- */
   const openEdit = (r) => {
     setEditId(r.id);
+
+    setERequestToId(r.requestToId ? String(r.requestToId) : "");
     setEType(r.leaveType);
     setEMode(r.mode);
     setEFrom(r.from);
@@ -183,18 +299,32 @@ export default function EmployeeLeaveManagement() {
   const saveEdit = async (e) => {
     e.preventDefault();
 
+    if (!eRequestToId) {
+      alert("Please select Request To (approver).");
+      return;
+    }
+
+    const updatePayload = {
+      leave_type: eType,
+      mode: eMode,
+      from_date: eFrom,
+      to_date: eMode === "Full Day" ? eTo : eFrom,
+
+      time_from: needsTime(eMode) ? eFromTime : null,
+      time_to: needsTime(eMode) ? eToTime : null,
+      hours: needsTime(eMode) ? calcDuration(eFromTime, eToTime) : null,
+
+      reason: eReason,
+
+      // ✅ allow change approver while Pending
+      request_to_id: selectedEditApprover?.id ?? eRequestToId,
+      request_to_name: selectedEditApprover?.name ?? null,
+      request_to_role: selectedEditApprover?.role ?? null,
+    };
+
     const { error } = await supabase
       .from("employee_leaves")
-      .update({
-        leave_type: eType,
-        mode: eMode,
-        from_date: eFrom,
-        to_date: eMode === "Full Day" ? eTo : eFrom,
-        time_from: needsTime(eMode) ? eFromTime : null,
-        time_to: needsTime(eMode) ? eToTime : null,
-        hours: needsTime(eMode) ? calcDuration(eFromTime, eToTime) : null,
-        reason: eReason,
-      })
+      .update(updatePayload)
       .eq("id", editId);
 
     if (error) return alert(error.message);
@@ -203,33 +333,19 @@ export default function EmployeeLeaveManagement() {
     fetchLeaves();
   };
 
-  const TimePreset = ({ onMorning, onAfternoon }) => (
-    <div className="flex gap-2">
-      <button type="button" onClick={onMorning} className="px-3 py-1 text-xs border rounded">
-        Morning (09:00 - 13:00)
-      </button>
-      <button type="button" onClick={onAfternoon} className="px-3 py-1 text-xs border rounded">
-        Afternoon (13:00 - 17:00)
-      </button>
-    </div>
-  );
-
   /* ---------------- UI ---------------- */
   return (
     <div className="space-y-5">
-
       {/* HEADER */}
       <div className="bg-slate-800 text-white rounded-2xl p-5">
-        <div className="flex justify-between">
+        <div className="flex justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-xl font-semibold">Leave Management</h2>
-            <p className="text-sm text-slate-300">
-              Full Day · Half Day · Permission
-            </p>
+            <p className="text-sm text-slate-300">Full Day · Half Day · Permission</p>
           </div>
           <button
             onClick={() => setCreateOpen(true)}
-            className="bg-white text-slate-800 px-4 py-2 rounded-lg flex gap-2"
+            className="bg-white text-slate-800 px-4 py-2 rounded-lg flex gap-2 items-center"
           >
             <Plus size={16} /> New Leave
           </button>
@@ -255,7 +371,7 @@ export default function EmployeeLeaveManagement() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search leave..."
+          placeholder="Search leave / mode / request to..."
           className="w-full border rounded-lg px-3 py-2 text-sm"
         />
       </div>
@@ -267,47 +383,76 @@ export default function EmployeeLeaveManagement() {
             <tr>
               <th className="px-4 py-3 text-left">Leave</th>
               <th className="px-4 py-3">Duration</th>
+              <th className="px-4 py-3">Request To</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
+
           <tbody className="divide-y">
-            {filtered.map((r) => (
-              <tr key={r.id}>
-                <td className="px-4 py-3">
-                  <div className="font-semibold">{r.leaveType}</div>
-                  <div className="text-xs text-slate-500">
-                    {r.mode} {r.hours ? `• ${r.hours}` : ""}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  {r.from} {r.to && `→ ${r.to}`}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded-full border text-xs ${tone[r.status]}`}>
-                    {r.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button onClick={() => setViewId(r.id)} className="p-2">
-                    <Eye size={16} />
-                  </button>
-                  <button
-                    disabled={r.status !== "Pending"}
-                    onClick={() => openEdit(r)}
-                    className="p-2 disabled:opacity-40"
-                  >
-                    <Pencil size={16} />
-                  </button>
+            {loading ? (
+              <tr>
+                <td className="px-4 py-6 text-slate-500" colSpan={5}>
+                  Loading...
                 </td>
               </tr>
-            ))}
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td className="px-4 py-6 text-slate-500" colSpan={5}>
+                  No leave requests found.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((r) => (
+                <tr key={r.id}>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold">{r.leaveType}</div>
+                    <div className="text-xs text-slate-500">
+                      {r.mode} {r.hours ? `• ${r.hours}` : ""}
+                    </div>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    {r.from} {r.to && `→ ${r.to}`}
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <div className="text-xs text-slate-600">
+                      {r.requestToName || "-"}
+                      {r.requestToRole ? (
+                        <span className="ml-2 px-2 py-0.5 border rounded-full">
+                          {r.requestToRole}
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 rounded-full border text-xs ${tone[r.status]}`}>
+                      {r.status}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => setViewId(r.id)} className="p-2">
+                      <Eye size={16} />
+                    </button>
+
+                    <button
+                      disabled={r.status !== "Pending"}
+                      onClick={() => openEdit(r)}
+                      className="p-2 disabled:opacity-40"
+                      title={r.status !== "Pending" ? "Only Pending can be edited" : "Edit"}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
-
- 
-
 
       {/* VIEW MODAL */}
       {selectedView && (
@@ -323,11 +468,21 @@ export default function EmployeeLeaveManagement() {
               <div className="p-3 border rounded-lg">
                 <p className="text-xs text-slate-500">Status</p>
                 <span
-                  className={`inline-block mt-1 px-2 py-1 rounded-full border text-xs font-semibold ${tone[selectedView.status]}`}
+                  className={`inline-block mt-1 px-2 py-1 rounded-full border text-xs font-semibold ${
+                    tone[selectedView.status]
+                  }`}
                 >
                   {selectedView.status}
                 </span>
               </div>
+            </div>
+
+            <div className="p-3 border rounded-lg">
+              <p className="text-xs text-slate-500">Request To</p>
+              <p className="font-semibold">{selectedView.requestToName || "-"}</p>
+              {selectedView.requestToId ? (
+                <p className="text-xs text-slate-500 mt-1">{selectedView.requestToId}</p>
+              ) : null}
             </div>
 
             <div className="p-3 border rounded-lg">
@@ -373,6 +528,37 @@ export default function EmployeeLeaveManagement() {
       {createOpen && (
         <ModalShell title="Apply Leave" onClose={() => setCreateOpen(false)}>
           <form onSubmit={createLeave} className="space-y-3">
+            {/* Request To */}
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Request To</label>
+              <select
+                value={cRequestToId}
+                onChange={(e) => setCRequestToId(e.target.value)}
+                required
+                className="w-full border rounded-lg px-3 py-2"
+              >
+                <option value="">Select Approver</option>
+                {approvers.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} {a.role ? `(${a.role})` : ""}
+                  </option>
+                ))}
+              </select>
+
+              {approvers.length === 0 ? (
+                <p className="text-xs text-rose-600 mt-1">
+                  Approver list empty.
+                  {approverError ? (
+                    <span className="block mt-1">Error: {approverError}</span>
+                  ) : (
+                    <span className="block mt-1">
+                      Check `hrmss_approvers` table data (active=true, access='approver') and RLS SELECT policy.
+                    </span>
+                  )}
+                </p>
+              ) : null}
+            </div>
+
             <select
               value={cType}
               onChange={(e) => setCType(e.target.value)}
@@ -389,12 +575,10 @@ export default function EmployeeLeaveManagement() {
                 const next = e.target.value;
                 setCMode(next);
 
-                // Full day -> date range, clear times
                 if (next === "Full Day") {
                   setCFromTime("");
                   setCToTime("");
                 } else {
-                  // Half Day / Permission -> single date
                   setCTo("");
                 }
               }}
@@ -423,7 +607,6 @@ export default function EmployeeLeaveManagement() {
               />
             )}
 
-            {/* ✅ Half Day + Permission -> time */}
             {needsTime(cMode) && (
               <>
                 <TimePreset
@@ -491,6 +674,24 @@ export default function EmployeeLeaveManagement() {
       {selectedEdit && (
         <ModalShell title="Edit Leave" onClose={() => setEditId(null)}>
           <form onSubmit={saveEdit} className="space-y-3">
+            {/* Request To */}
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Request To</label>
+              <select
+                value={eRequestToId}
+                onChange={(e) => setERequestToId(e.target.value)}
+                required
+                className="w-full border rounded-lg px-3 py-2"
+              >
+                <option value="">Select Approver</option>
+                {approvers.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} {a.role ? `(${a.role})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <select
               value={eType}
               onChange={(e) => setEType(e.target.value)}
@@ -537,7 +738,6 @@ export default function EmployeeLeaveManagement() {
               />
             )}
 
-            {/* ✅ Half Day + Permission -> time */}
             {needsTime(eMode) && (
               <>
                 <TimePreset
@@ -603,3 +803,17 @@ export default function EmployeeLeaveManagement() {
     </div>
   );
 }
+
+/*
+✅ DB REQUIRED:
+employee_leaves must have:
+- request_to_id (text)
+- request_to_name (text)
+- request_to_role (text)
+
+✅ Approver dropdown source:
+hrmss_approvers must have:
+- id, name, role, access, active
+And data like:
+access='approver', active=true
+*/

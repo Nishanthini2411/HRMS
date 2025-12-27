@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   LayoutDashboard,
   LogOut,
+  Menu,
   Settings,
   UserCircle2,
   FileText,
@@ -39,6 +40,7 @@ const tabs = [
 
 export default function EmployeeLayout() {
   const navigate = useNavigate();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
     if (localStorage.getItem("hrmss.signin.completed.employee") !== "true") {
@@ -52,10 +54,27 @@ export default function EmployeeLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      <aside className="w-[280px] bg-white border-r sticky top-0 h-screen">
-        <div className="h-full flex flex-col">
-          <div className="p-5 border-b">
+      <aside
+        className={`bg-white border-r sticky top-0 h-screen overflow-hidden transition-all duration-200 ${
+          isSidebarOpen ? "w-[280px]" : "w-0 border-r-0"
+        }`}
+      >
+        <div
+          className={`h-full flex flex-col transition-opacity duration-200 ${
+            isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="p-5 border-b flex items-center justify-between gap-3">
             <div className="text-xl font-extrabold text-gray-900">TWITE HRMS</div>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50"
+              aria-label="Hide sidebar"
+              title="Hide sidebar"
+            >
+              <Menu size={18} />
+            </button>
             {/* <div className="text-xs text-gray-500 mt-1">Self Service Workspace</div> */}
           </div>
 
@@ -86,7 +105,18 @@ export default function EmployeeLayout() {
       <main className="flex-1 flex flex-col">
         <header className="bg-white border-b sticky top-0 z-40">
           <div className="px-6 py-4 flex items-center justify-between">
-            <div className="text-sm text-gray-500">Employee Workspace</div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen((open) => !open)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50"
+                aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+                title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              >
+                <Menu size={18} />
+              </button>
+              <div className="text-sm text-gray-500">Employee Workspace</div>
+            </div>
             <div className="flex items-center gap-2">
               <NavLink
                 to="notifications"

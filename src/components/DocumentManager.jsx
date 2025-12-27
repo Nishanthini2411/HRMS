@@ -1,20 +1,43 @@
-import { useMemo, useRef, useState } from "react";
-import { UploadCloud, Download, Eye, Grid, List, Search, Trash2 } from "lucide-react";
+// src/components/DocumentManager.jsx
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  UploadCloud,
+  Download,
+  Eye,
+  Grid,
+  List,
+  Search,
+  Trash2,
+  Loader2,
+} from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
 
+/* ===================== CONFIG ===================== */
+const DOCS_TABLE = "hrmss_documents";
+const BUCKET = "hrmss-documents";
+
+// optional role snapshot (admin/employee/hr/manager). If you pass role from pages, it will store.
+const ALLOWED_ROLES = new Set(["admin", "employee", "hr", "manager"]);
+
+/* ===================== HELPERS ===================== */
 const formatBytes = (bytes) => {
   if (!bytes && bytes !== 0) return "-";
   const units = ["B", "KB", "MB", "GB"];
-  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const idx = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
   const val = bytes / Math.pow(1024, idx);
   return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 };
 
 const getFileType = (file) => {
-  const t = file?.type || "";
+  const t = (file?.type || "").toLowerCase();
   if (t.includes("pdf")) return "PDF";
   if (t.includes("image")) return "IMAGE";
-  if (t.includes("word")) return "WORD";
-  if (t.includes("excel")) return "EXCEL";
+  if (t.includes("word") || t.includes("doc")) return "WORD";
+  if (t.includes("excel") || t.includes("sheet") || t.includes("xls"))
+    return "EXCEL";
   return "FILE";
 };
 
@@ -27,22 +50,121 @@ const badgeColor = (type) => {
 };
 
 const accentMap = {
-  blue: { solid: "bg-blue-600 text-white", hover: "hover:bg-blue-700", subtle: "text-blue-700", border: "hover:border-blue-500" },
-  purple: { solid: "bg-purple-700 text-white", hover: "hover:bg-purple-800", subtle: "text-purple-700", border: "hover:border-purple-500" },
-  slate: { solid: "bg-slate-900 text-white", hover: "hover:bg-black", subtle: "text-slate-800", border: "hover:border-slate-500" },
+  blue: {
+    solid: "bg-blue-600 text-white",
+    hover: "hover:bg-blue-700",
+    subtle: "text-blue-700",
+    border: "hover:border-blue-500",
+  },
+  purple: {
+    solid: "bg-purple-700 text-white",
+    hover: "hover:bg-purple-800",
+    subtle: "text-purple-700",
+    border: "hover:border-purple-500",
+  },
+  slate: {
+    solid: "bg-slate-900 text-white",
+    hover: "hover:bg-black",
+    subtle: "text-slate-800",
+    border: "hover:border-slate-500",
+  },
 };
 
-export default function DocumentManager({ title = "Documents", subtitle, accent = "blue" }) {
+const safeFileName = (name = "file") => {
+  // keep extensions; remove weird chars
+  const n = name.replace(/[^\w.\-() ]+/g, "_").trim();
+  return n.length ? n : "file";
+};
+
+const must = (v, msg) => {
+  if (!v) throw new Error(msg);
+  return v;
+};
+
+/* ===================== COMPONENT ===================== */
+/**
+ * Props:
+ * - title, subtitle, accent
+ * - role (optional): "admin" | "employee" | "hr" | "manager"
+ * - categoryOptions (optional)
+ */
+export default function DocumentManager({
+  title = "Documents",
+  subtitle,
+  accent = "blue",
+  role, // optional role snapshot
+  categoryOptions = [
+    "Offer Letter",
+    "Payslip",
+    "Appointment Letter",
+    "HR Policy",
+    "Other",
+  ],
+}) {
   const theme = accentMap[accent] || accentMap.blue;
   const fileRef = useRef(null);
 
-  const [docs, setDocs] = useState([]);
+  const [docs, setDocs] = useState([]); // from DB
   const [docTitle, setDocTitle] = useState("");
-  const [category, setCategory] = useState("Offer Letter");
+  const [category, setCategory] = useState(categoryOptions?.[0] || "Other");
   const [file, setFile] = useState(null);
   const [search, setSearch] = useState("");
   const [view, setView] = useState("table");
 
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  /* ---------- LOAD DOCS ---------- */
+  const loadDocs = async () => {
+    try {
+      setLoading(true);
+
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
+      if (sessionErr) throw sessionErr;
+
+      const userId = sessionData?.session?.user?.id;
+      must(userId, "Please login to view documents.");
+
+      const { data, error } = await supabase
+        .from(DOCS_TABLE)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      // RLS already restricts to own docs, so no need to filter here
+      setDocs((data || []).map(mapRowToUi));
+    } catch (e) {
+      console.error("loadDocs error:", e);
+      setDocs([]);
+      // optional: show alert
+      // alert(e.message || "Failed to load documents");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDocs();
+
+    // realtime refresh (optional)
+    const channel = supabase
+      .channel("hrmss_documents_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: DOCS_TABLE },
+        () => loadDocs()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---------- PICK FILE ---------- */
   const pickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -50,31 +172,156 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
     if (!docTitle) setDocTitle(f.name.replace(/\.[^/.]+$/, ""));
   };
 
-  const upload = () => {
-    if (!file || !docTitle) return alert("Title & file required");
-    const doc = {
-      id: crypto.randomUUID(),
-      title: docTitle,
-      category,
-      fileName: file.name,
-      size: file.size,
-      type: getFileType(file),
-      url: URL.createObjectURL(file),
-      date: new Date().toLocaleString(),
-    };
-    setDocs((p) => [doc, ...p]);
-    setDocTitle("");
-    setFile(null);
-    fileRef.current.value = "";
+  /* ---------- UPLOAD: Storage + DB ---------- */
+  const upload = async () => {
+    try {
+      if (!file || !docTitle) return alert("Title & file required");
+
+      setBusy(true);
+
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
+      if (sessionErr) throw sessionErr;
+
+      const user = sessionData?.session?.user;
+      must(user?.id, "Please login to upload documents.");
+      const userId = user.id;
+
+      const fileName = safeFileName(file.name);
+      const ext = fileName.includes(".") ? fileName.split(".").pop() : "";
+      const typeGuess = getFileType(file);
+
+      // ✅ Path must start with auth.uid() folder for Storage RLS
+      const stamp = Date.now();
+      const storagePath = `${userId}/${stamp}_${fileName}`;
+
+      // 1) Upload to Storage
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (upErr) throw upErr;
+
+      // 2) Insert into DB
+      const payload = {
+        user_id: userId,
+        role:
+          role && ALLOWED_ROLES.has(String(role).toLowerCase())
+            ? String(role).toLowerCase()
+            : null,
+        title: docTitle.trim(),
+        category,
+        file_name: fileName,
+        mime_type: file.type || null,
+        size_bytes: file.size ?? null,
+        bucket: BUCKET,
+        storage_path: storagePath,
+      };
+
+      const { data: inserted, error: insErr } = await supabase
+        .from(DOCS_TABLE)
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (insErr) {
+        // rollback storage if db insert failed
+        await supabase.storage.from(BUCKET).remove([storagePath]);
+        throw insErr;
+      }
+
+      // 3) Refresh list (or add inserted to top)
+      setDocs((p) => [mapRowToUi(inserted), ...p]);
+
+      // reset form
+      setDocTitle("");
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+
+      alert("Document uploaded!");
+    } catch (e) {
+      console.error("upload error:", e);
+      alert(e.message || "Upload failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const remove = (id) => setDocs((p) => p.filter((d) => d.id !== id));
+  /* ---------- VIEW / DOWNLOAD: signed url ---------- */
+  const openSignedUrl = async (doc, mode = "view") => {
+    try {
+      setBusy(true);
+      const { data, error } = await supabase.storage
+        .from(doc.bucket || BUCKET)
+        .createSignedUrl(doc.storagePath, 60 * 10); // 10 minutes
 
+      if (error) throw error;
+
+      const url = data?.signedUrl;
+      must(url, "Failed to generate URL");
+
+      if (mode === "download") {
+        // download by opening in new tab; browser will handle based on headers
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      console.error("signed url error:", e);
+      alert(e.message || "Failed to open file");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* ---------- DELETE: DB + Storage ---------- */
+  const remove = async (doc) => {
+    const ok = window.confirm("Delete this document?");
+    if (!ok) return;
+
+    try {
+      setBusy(true);
+
+      // delete db row first (RLS ensures only own)
+      const { error: delErr } = await supabase
+        .from(DOCS_TABLE)
+        .delete()
+        .eq("id", doc.id);
+
+      if (delErr) throw delErr;
+
+      // delete file from storage (RLS ensures only own folder)
+      const { error: stoErr } = await supabase.storage
+        .from(doc.bucket || BUCKET)
+        .remove([doc.storagePath]);
+
+      if (stoErr) {
+        // not critical; db already removed
+        console.warn("storage remove error:", stoErr);
+      }
+
+      setDocs((p) => p.filter((d) => d.id !== doc.id));
+    } catch (e) {
+      console.error("remove error:", e);
+      alert(e.message || "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* ---------- FILTER ---------- */
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return docs;
     return docs.filter(
       (d) =>
-        d.title.toLowerCase().includes(search.toLowerCase()) ||
-        d.fileName.toLowerCase().includes(search.toLowerCase())
+        (d.title || "").toLowerCase().includes(q) ||
+        (d.fileName || "").toLowerCase().includes(q)
     );
   }, [docs, search]);
 
@@ -83,20 +330,29 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-          {subtitle ? <p className="text-xs text-slate-500">{subtitle}</p> : null}
+          {subtitle ? (
+            <p className="text-xs text-slate-500">{subtitle}</p>
+          ) : null}
         </div>
+
         <div className="flex items-center gap-2">
           <button
             onClick={() => setView("table")}
-            className={`p-2 rounded-lg border ${view === "table" ? theme.solid : "bg-white"} ${theme.hover}`}
+            className={`p-2 rounded-lg border ${
+              view === "table" ? theme.solid : "bg-white"
+            } ${theme.hover}`}
             aria-label="Table view"
+            type="button"
           >
             <List size={16} />
           </button>
           <button
             onClick={() => setView("grid")}
-            className={`p-2 rounded-lg border ${view === "grid" ? theme.solid : "bg-white"} ${theme.hover}`}
+            className={`p-2 rounded-lg border ${
+              view === "grid" ? theme.solid : "bg-white"
+            } ${theme.hover}`}
             aria-label="Grid view"
+            type="button"
           >
             <Grid size={16} />
           </button>
@@ -105,7 +361,7 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
 
       <div className="bg-white rounded-2xl border shadow-sm p-5">
         <div
-          onClick={() => fileRef.current.click()}
+          onClick={() => fileRef.current?.click()}
           className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition ${theme.border}`}
         >
           <UploadCloud className={`mx-auto ${theme.subtle}`} />
@@ -117,9 +373,15 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
           <div className="mt-4 flex items-center justify-between bg-gray-50 p-3 rounded-xl">
             <div>
               <div className="font-medium">{file.name}</div>
-              <div className="text-xs text-gray-500">{formatBytes(file.size)}</div>
+              <div className="text-xs text-gray-500">
+                {formatBytes(file.size)} • {getFileType(file)}
+              </div>
             </div>
-            <button onClick={() => setFile(null)} className="text-xs underline">
+            <button
+              onClick={() => setFile(null)}
+              className="text-xs underline"
+              type="button"
+            >
               Remove
             </button>
           </div>
@@ -132,26 +394,34 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
             placeholder="Document title"
             className="rounded-xl border px-3 py-2 text-sm"
           />
+
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             className="rounded-xl border px-3 py-2 text-sm"
           >
-            <option>Offer Letter</option>
-            <option>Payslip</option>
-            <option>Appointment Letter</option>
-            <option>HR Policy</option>
-            <option>Other</option>
+            {categoryOptions.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
           </select>
+
           <button
             onClick={upload}
-            className={`rounded-xl ${theme.solid} font-semibold text-sm ${theme.hover}`}
+            disabled={busy}
+            className={`rounded-xl ${theme.solid} font-semibold text-sm ${theme.hover} px-4 py-2.5 inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed`}
+            type="button"
           >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : null}
             Upload Document
           </button>
         </div>
 
-        <input type="file" ref={fileRef} className="hidden" onChange={pickFile} />
+        <input
+          type="file"
+          ref={fileRef}
+          className="hidden"
+          onChange={pickFile}
+        />
       </div>
 
       <div className="flex items-center gap-2">
@@ -162,9 +432,22 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
           placeholder="Search documents..."
           className="w-full md:w-72 rounded-xl border px-3 py-2 text-sm"
         />
+        <button
+          type="button"
+          onClick={loadDocs}
+          className="ml-auto text-xs px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
+          disabled={busy}
+        >
+          Refresh
+        </button>
       </div>
 
-      {view === "table" && (
+      {loading ? (
+        <div className="rounded-2xl border bg-white p-6 text-sm text-slate-600 flex items-center gap-2">
+          <Loader2 size={16} className="animate-spin" />
+          Loading documents...
+        </div>
+      ) : view === "table" ? (
         <div className="bg-white rounded-2xl border overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 text-gray-600">
@@ -183,6 +466,7 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
                   </td>
                 </tr>
               )}
+
               {filtered.map((d) => (
                 <tr key={d.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
@@ -194,23 +478,48 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
                       >
                         {d.type}
                       </span>
-                      <div>
+                      <div className="min-w-0">
                         <div className="font-semibold">{d.title}</div>
-                        <div className="text-xs text-gray-500">{d.fileName}</div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {d.fileName}
+                        </div>
+                        <div className="text-[11px] text-gray-400 mt-0.5">
+                          {d.date}
+                        </div>
                       </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">{d.category}</td>
                   <td className="px-4 py-3">{formatBytes(d.size)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
-                      <a href={d.url} target="_blank" rel="noreferrer">
+                    <div className="flex justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openSignedUrl(d, "view")}
+                        className="hover:opacity-80"
+                        title="View"
+                        disabled={busy}
+                      >
                         <Eye size={16} />
-                      </a>
-                      <a href={d.url} download>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openSignedUrl(d, "download")}
+                        className="hover:opacity-80"
+                        title="Download"
+                        disabled={busy}
+                      >
                         <Download size={16} />
-                      </a>
-                      <button onClick={() => remove(d.id)}>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => remove(d)}
+                        className="hover:opacity-80"
+                        title="Delete"
+                        disabled={busy}
+                      >
                         <Trash2 size={16} className="text-rose-600" />
                       </button>
                     </div>
@@ -220,10 +529,14 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
             </tbody>
           </table>
         </div>
-      )}
-
-      {view === "grid" && (
+      ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.length === 0 ? (
+            <div className="rounded-2xl border bg-white p-6 text-sm text-gray-500">
+              No documents found
+            </div>
+          ) : null}
+
           {filtered.map((d) => (
             <div key={d.id} className="bg-white border rounded-2xl p-4 shadow-sm">
               <span
@@ -236,15 +549,31 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
               <h3 className="font-semibold truncate">{d.title}</h3>
               <p className="text-xs text-gray-500 truncate">{d.fileName}</p>
               <p className="text-xs mt-1">{formatBytes(d.size)}</p>
+              <p className="text-[11px] text-gray-400 mt-2">{d.date}</p>
 
               <div className="flex justify-end gap-3 mt-4">
-                <a href={d.url} target="_blank" rel="noreferrer">
+                <button
+                  type="button"
+                  onClick={() => openSignedUrl(d, "view")}
+                  disabled={busy}
+                  title="View"
+                >
                   <Eye size={16} />
-                </a>
-                <a href={d.url} download>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openSignedUrl(d, "download")}
+                  disabled={busy}
+                  title="Download"
+                >
                   <Download size={16} />
-                </a>
-                <button onClick={() => remove(d.id)}>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => remove(d)}
+                  disabled={busy}
+                  title="Delete"
+                >
                   <Trash2 size={16} className="text-rose-600" />
                 </button>
               </div>
@@ -254,8 +583,36 @@ export default function DocumentManager({ title = "Documents", subtitle, accent 
       )}
 
       <p className="text-xs text-gray-400">
-        Demo only — connect storage/back-end for persistence.
+        Connected to Supabase (Storage + DB). Users will see only their own
+        documents (RLS).
       </p>
     </section>
   );
+}
+
+/* ===================== MAPPER ===================== */
+function mapRowToUi(r) {
+  // r from hrmss_documents
+  const fileName = r.file_name || "";
+  const type =
+    (r.mime_type || "").includes("pdf") ? "PDF" : // fallback
+    fileName.toLowerCase().endsWith(".pdf") ? "PDF" :
+    fileName.toLowerCase().match(/\.(png|jpg|jpeg|webp|gif)$/) ? "IMAGE" :
+    fileName.toLowerCase().match(/\.(doc|docx)$/) ? "WORD" :
+    fileName.toLowerCase().match(/\.(xls|xlsx|csv)$/) ? "EXCEL" :
+    "FILE";
+
+  const dt = r.created_at ? new Date(r.created_at) : null;
+
+  return {
+    id: r.id,
+    title: r.title,
+    category: r.category,
+    fileName,
+    size: r.size_bytes ?? null,
+    type,
+    bucket: r.bucket,
+    storagePath: r.storage_path,
+    date: dt ? dt.toLocaleString() : "-",
+  };
 }
