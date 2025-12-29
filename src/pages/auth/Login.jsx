@@ -13,6 +13,23 @@ import {
 
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { MANAGER_SESSION_KEY } from "../manager/managerData";
+import { ensureAdminSupabaseSession } from "../../lib/employeeAuthBridge";
+
+/**
+ * IMPORTANT (for Documents Upload):
+ * Supabase Storage/Table policies usually need a Supabase Auth session (auth.uid()).
+ * If you see "Email not confirmed" or "Invalid login credentials" during ensureAdminSupabaseSession,
+ * you MUST create/confirm those users in Supabase Auth (Dashboard → Authentication → Users)
+ * OR disable Email confirmations for the project.
+ *
+ * ✅ Quick company-demo fix:
+ *  - Supabase Dashboard → Authentication → Users → "Add user"
+ *  - Create users:
+ *      HR@twite.ai / Twite@hr      (Auto confirm ON)
+ *      arun.murugappa@twite.ai / Twite@arun (Auto confirm ON)
+ *      sunil.reddy@twite.ai / Twite@sunil  (Auto confirm ON)
+ *    + (Optional) Employee shadow emails like EMP-001@employee.twite.local with their password (Auto confirm ON)
+ */
 
 /* ---------------- Field ---------------- */
 const Field = forwardRef(
@@ -164,7 +181,8 @@ export default function Login() {
     localStorage.setItem("hrmss.lastRole", nextRole);
 
     // ✅ redirectTo must be dashboard (finish panna than dashboard varanum)
-    const redirectTo = extraState?.redirectTo || roleRedirects[nextRole] || "/login";
+    const redirectTo =
+      extraState?.redirectTo || roleRedirects[nextRole] || "/login";
 
     navigate("/sign-in", {
       state: { role: nextRole, redirectTo, ...extraState },
@@ -219,7 +237,9 @@ export default function Login() {
   // ✅ EMPLOYEE login RPC (ONLY admin-created id/password works)
   const rpcEmployeeLogin = async ({ p_employee_id, p_password }) => {
     if (!isSupabaseConfigured) {
-      throw new Error("Supabase env missing. Employee login cannot be verified.");
+      throw new Error(
+        "Supabase env missing. Employee login cannot be verified."
+      );
     }
 
     const { data, error } = await supabase.rpc("employee_login_js", {
@@ -273,6 +293,37 @@ export default function Login() {
     return !!data;
   };
 
+  /* ---------------- SUPABASE AUTH BRIDGE (FOR DOCUMENTS) ---------------- */
+
+  // ✅ Don’t break app login if bridge fails; only show a clear message.
+  const tryEnsureSupabaseForDocs = async (params, roleLabelForError = "") => {
+    try {
+      await ensureAdminSupabaseSession(params);
+
+      // mark ok (optional)
+      const k = `hrmss.supabase.docsAuth.ok.${params?.role || "unknown"}`;
+      localStorage.setItem(k, "true");
+      return true;
+    } catch (e) {
+      const k = `hrmss.supabase.docsAuth.ok.${params?.role || "unknown"}`;
+      localStorage.setItem(k, "false");
+
+      // Keep app login working, but warn user why docs may fail
+      const msg =
+        e?.message ||
+        "Supabase Auth bridge failed. Create/confirm user in Supabase Auth.";
+      console.error("[DocsAuth] ensureAdminSupabaseSession failed:", e);
+
+      // Only set error if nothing else set yet
+      setErr(
+        roleLabelForError
+          ? `Supabase Auth login failed for ${roleLabelForError}. ${msg}`
+          : msg
+      );
+      return false;
+    }
+  };
+
   /* ---------------- SUBMIT (LOGIN) ---------------- */
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -313,7 +364,19 @@ export default function Login() {
           JSON.stringify({ ...session, loginRole: "hr" })
         );
 
-        const userId = session?.user_id || session?.id || session?.userId || null;
+        // ✅ Ensure Supabase session for Documents/Storage (will not block app login)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "hr",
+            identifier: hrEmail,
+            password: hrPassword,
+            preferredEmail: hrEmail,
+          },
+          "hr"
+        );
+
+        const userId =
+          session?.user_id || session?.id || session?.userId || null;
         const completed =
           isCompleted("hr") || (userId ? await appProfileExists(userId) : false);
 
@@ -336,9 +399,15 @@ export default function Login() {
           return;
         }
 
-        const localLogin = resolveLocalManagerLogin(managerEmail, managerPassword);
+        const localLogin = resolveLocalManagerLogin(
+          managerEmail,
+          managerPassword
+        );
         if (localLogin) {
-          localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(localLogin.session));
+          localStorage.setItem(
+            MANAGER_SESSION_KEY,
+            JSON.stringify(localLogin.session)
+          );
           localStorage.setItem(
             "HRMSS_AUTH_SESSION",
             JSON.stringify({
@@ -346,6 +415,17 @@ export default function Login() {
               loginRole: "manager",
               role: "manager",
             })
+          );
+
+          // ✅ Ensure Supabase session for Documents/Storage (will not block app login)
+          await tryEnsureSupabaseForDocs(
+            {
+              role: "manager",
+              identifier: managerEmail,
+              password: managerPassword,
+              preferredEmail: managerEmail,
+            },
+            "manager"
           );
 
           if (!localStorage.getItem(MANAGER_COMPLETION_KEY)) {
@@ -364,7 +444,11 @@ export default function Login() {
           if (!completed) {
             navigate("/sign-in", {
               replace: true,
-              state: { role: "manager", access: localLogin.session.access, redirectTo },
+              state: {
+                role: "manager",
+                access: localLogin.session.access,
+                redirectTo,
+              },
             });
             return;
           }
@@ -380,7 +464,9 @@ export default function Login() {
 
         const access = String(m.access || "viewer").toLowerCase();
         const route =
-          access === "approver" ? "/manager-approver-dashboard" : "/manager-dashboard";
+          access === "approver"
+            ? "/manager-approver-dashboard"
+            : "/manager-dashboard";
 
         const managerSession = {
           id: m.manager_code || m.id || "MGR",
@@ -390,10 +476,28 @@ export default function Login() {
           team: m.team || "—",
         };
 
-        localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(managerSession));
+        localStorage.setItem(
+          MANAGER_SESSION_KEY,
+          JSON.stringify(managerSession)
+        );
         localStorage.setItem(
           "HRMSS_AUTH_SESSION",
-          JSON.stringify({ ...managerSession, loginRole: "manager", role: "manager" })
+          JSON.stringify({
+            ...managerSession,
+            loginRole: "manager",
+            role: "manager",
+          })
+        );
+
+        // ✅ Ensure Supabase session for Documents/Storage (will not block app login)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "manager",
+            identifier: managerEmail,
+            password: managerPassword,
+            preferredEmail: managerEmail,
+          },
+          "manager"
         );
 
         if (!localStorage.getItem(MANAGER_COMPLETION_KEY)) {
@@ -436,21 +540,31 @@ export default function Login() {
           JSON.stringify({ ...session, loginRole: "admin" })
         );
 
-        const userId = session?.user_id || session?.id || session?.userId || null;
-        const completed =
-  localStorage.getItem(COMPLETION_KEY("admin")) === "true";
+        // ✅ Ensure Supabase session for Documents/Storage (admin works for you already)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "admin",
+            identifier: adminUsername,
+            adminId,
+            password: adminPassword,
+            preferredEmail: "admin@twite.local",
+          },
+          "admin"
+        );
 
+        const completed =
+          localStorage.getItem(COMPLETION_KEY("admin")) === "true";
 
         if (!completed) {
-  navigate("/sign-in", {
-    replace: true,
-    state: { role: "admin", redirectTo: roleRedirects.admin },
-  });
-  return;
-}
+          navigate("/sign-in", {
+            replace: true,
+            state: { role: "admin", redirectTo: roleRedirects.admin },
+          });
+          return;
+        }
 
-navigate(roleRedirects.admin, { replace: true });
-return;
+        navigate(roleRedirects.admin, { replace: true });
+        return;
       }
 
       // ✅ EMPLOYEE
@@ -467,6 +581,15 @@ return;
 
         const employeeId = String(emp.employee_id || empId).trim();
 
+        // preferredEmail (if your employee table has official email, use it)
+        const preferredEmail =
+          emp?.official_email ||
+          emp?.officialEmail ||
+          emp?.email ||
+          emp?.work_email ||
+          // ✅ stable shadow email (IMPORTANT: don’t use date-based; use employeeId)
+          `${employeeId.toLowerCase()}@employee.twite.local`;
+
         // store auth cache
         localStorage.setItem(
           "HRMSS_AUTH_SESSION",
@@ -476,20 +599,39 @@ return;
             loginRole: "employee",
             role: "employee",
             employee_id: employeeId,
+            officialEmail: preferredEmail,
           })
+        );
+
+        // ✅ Ensure Supabase session for Documents/Storage (will not block app login)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "employee",
+            identifier: employeeId,
+            password: empPassword,
+            preferredEmail,
+          },
+          "employee"
         );
 
         // ✅ IMPORTANT: completed only if profile_completed=true
         const completed = await employeeProfileExists(employeeId);
 
         // ✅ sync localStorage completion
-        localStorage.setItem(COMPLETION_KEY("employee"), completed ? "true" : "false");
+        localStorage.setItem(
+          COMPLETION_KEY("employee"),
+          completed ? "true" : "false"
+        );
 
         if (!completed) {
           localStorage.setItem("hrmss.lastRole", "employee");
           navigate("/sign-in", {
             replace: true,
-            state: { role: "employee", empId: employeeId, redirectTo: "/employee-dashboard" },
+            state: {
+              role: "employee",
+              empId: employeeId,
+              redirectTo: "/employee-dashboard",
+            },
           });
           return;
         }
@@ -539,6 +681,18 @@ return;
           "HRMSS_AUTH_SESSION",
           JSON.stringify({ ...session, loginRole: "hr" })
         );
+
+        // ✅ Ensure Supabase session (will not block sign-in flow)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "hr",
+            identifier: hrEmail,
+            password: hrPassword,
+            preferredEmail: hrEmail,
+          },
+          "hr"
+        );
+
         goToSignIn("hr", { redirectTo: roleRedirects.hr });
         return;
       }
@@ -556,7 +710,9 @@ return;
 
         const access = String(m.access || "viewer").toLowerCase();
         const route =
-          access === "approver" ? "/manager-approver-dashboard" : "/manager-dashboard";
+          access === "approver"
+            ? "/manager-approver-dashboard"
+            : "/manager-dashboard";
 
         const managerSession = {
           id: m.manager_code || m.id || "MGR",
@@ -566,10 +722,28 @@ return;
           team: m.team || "—",
         };
 
-        localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(managerSession));
+        localStorage.setItem(
+          MANAGER_SESSION_KEY,
+          JSON.stringify(managerSession)
+        );
         localStorage.setItem(
           "HRMSS_AUTH_SESSION",
-          JSON.stringify({ ...managerSession, loginRole: "manager", role: "manager" })
+          JSON.stringify({
+            ...managerSession,
+            loginRole: "manager",
+            role: "manager",
+          })
+        );
+
+        // ✅ Ensure Supabase session (will not block sign-in flow)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "manager",
+            identifier: managerEmail,
+            password: managerPassword,
+            preferredEmail: managerEmail,
+          },
+          "manager"
         );
 
         goToSignIn("manager", { access, redirectTo: route });
@@ -591,6 +765,19 @@ return;
           "HRMSS_AUTH_SESSION",
           JSON.stringify({ ...session, loginRole: "admin" })
         );
+
+        // ✅ Ensure Supabase session (admin)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "admin",
+            identifier: adminUsername,
+            adminId,
+            password: adminPassword,
+            preferredEmail: "admin@twite.local",
+          },
+          "admin"
+        );
+
         goToSignIn("admin", { redirectTo: roleRedirects.admin });
         return;
       }
@@ -608,6 +795,12 @@ return;
         });
 
         const employeeId = String(emp.employee_id || empId).trim();
+        const preferredEmail =
+          emp?.official_email ||
+          emp?.officialEmail ||
+          emp?.email ||
+          emp?.work_email ||
+          `${employeeId.toLowerCase()}@employee.twite.local`;
 
         localStorage.setItem(
           "HRMSS_AUTH_SESSION",
@@ -617,17 +810,36 @@ return;
             loginRole: "employee",
             role: "employee",
             employee_id: employeeId,
+            officialEmail: preferredEmail,
           })
         );
 
+        // ✅ Ensure Supabase session (will not block sign-in flow)
+        await tryEnsureSupabaseForDocs(
+          {
+            role: "employee",
+            identifier: employeeId,
+            password: empPassword,
+            preferredEmail,
+          },
+          "employee"
+        );
+
         const completed = await employeeProfileExists(employeeId);
-        localStorage.setItem(COMPLETION_KEY("employee"), completed ? "true" : "false");
+        localStorage.setItem(
+          COMPLETION_KEY("employee"),
+          completed ? "true" : "false"
+        );
 
         if (!completed) {
           localStorage.setItem("hrmss.lastRole", "employee");
           navigate("/sign-in", {
             replace: true,
-            state: { role: "employee", empId: employeeId, redirectTo: "/employee-dashboard" },
+            state: {
+              role: "employee",
+              empId: employeeId,
+              redirectTo: "/employee-dashboard",
+            },
           });
           return;
         }

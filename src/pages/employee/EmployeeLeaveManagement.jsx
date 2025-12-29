@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabaseClient";
 
 /* ---------------- CONSTANTS ---------------- */
 const EMP = { id: "EMP-001", name: "Priya Sharma" };
+const LEAVES_TABLE = "hrmss_leave_requests";
 
 const leaveTypes = [
   "Casual Leave",
@@ -44,6 +45,13 @@ const calcDuration = (from, to) => {
 };
 
 const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
+
+const shortTime = (t) => {
+  if (!t) return "";
+  const s = String(t);
+  // "09:00:00" / "09:00:00+00" => "09:00"
+  return s.length >= 5 ? s.slice(0, 5) : s;
+};
 
 /* ---------------- APPROVER TABLE (Request To) ----------------
   ✅ We will fetch approvers ONLY from this table:
@@ -157,9 +165,10 @@ export default function EmployeeLeaveManagement() {
     setLoading(true);
 
     const { data, error } = await supabase
-      .from("employee_leaves")
+      .from(LEAVES_TABLE)
       .select("*")
-      .eq("employee_id", EMP.id)
+      .eq("owner_role", "employee")
+      .eq("owner_id", EMP.id)
       .order("applied_at", { ascending: false });
 
     if (error) {
@@ -175,8 +184,8 @@ export default function EmployeeLeaveManagement() {
         mode: r.mode,
         from: r.from_date,
         to: r.to_date,
-        timeFrom: r.time_from,
-        timeTo: r.time_to,
+        timeFrom: shortTime(r.time_from),
+        timeTo: shortTime(r.time_to),
         hours: r.hours,
         reason: r.reason,
         status: r.status,
@@ -248,8 +257,9 @@ export default function EmployeeLeaveManagement() {
     }
 
     const payload = {
-      employee_id: EMP.id,
-      employee_name: EMP.name,
+      owner_role: "employee",
+      owner_id: EMP.id,
+      owner_name: EMP.name,
 
       leave_type: cType,
       mode: cMode,
@@ -269,7 +279,7 @@ export default function EmployeeLeaveManagement() {
       request_to_role: selectedCreateApprover?.role ?? null,
     };
 
-    const { error } = await supabase.from("employee_leaves").insert(payload);
+    const { error } = await supabase.from(LEAVES_TABLE).insert(payload);
     if (error) return alert(error.message);
 
     setCreateOpen(false);
@@ -323,7 +333,7 @@ export default function EmployeeLeaveManagement() {
     };
 
     const { error } = await supabase
-      .from("employee_leaves")
+      .from(LEAVES_TABLE)
       .update(updatePayload)
       .eq("id", editId);
 
@@ -806,7 +816,20 @@ export default function EmployeeLeaveManagement() {
 
 /*
 ✅ DB REQUIRED:
-employee_leaves must have:
+hrmss_leave_requests must have at least:
+- owner_role (text)
+- owner_id (text)
+- owner_name (text)
+- leave_type (text)
+- mode (text)
+- from_date (date/text)
+- to_date (date/text)
+- time_from (time/text, nullable)
+- time_to (time/text, nullable)
+- hours (text, nullable)
+- reason (text)
+- status (text)
+- applied_at (timestamptz, default now())
 - request_to_id (text)
 - request_to_name (text)
 - request_to_role (text)

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   CheckSquare,
+  FileText,
   Home,
   LayoutPanelTop,
   LogOut,
@@ -20,6 +21,7 @@ const navItems = [
   { to: "/manager-dashboard/approvals", label: "Leave Approvals", icon: CheckSquare },
   { to: "/manager-dashboard/team", label: "Team Members", icon: Users },
   { to: "/manager-dashboard/payroll", label: "Payroll & Payslips", icon: LayoutPanelTop },
+  { to: "/manager-dashboard/documents", label: "Documents", icon: FileText },
   // { to: "/manager-dashboard/notifications", label: "Notifications", icon: Bell },
   // { to: "/manager-dashboard/profile", label: "My Profile", icon: User },
 ];

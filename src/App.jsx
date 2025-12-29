@@ -12,6 +12,7 @@ import LeaveManagement from "./pages/hr/LeaveManagement";
 import Attendance from "./pages/hr/Attendance";
 import HrNotifications from "./pages/hr/HrNotifications";
 import HrProfile from "./pages/hr/HrProfile";
+import HrDocuments from "./pages/hr/HrDocuments.jsx";
 
 /* ================= ADMIN ================= */
 import DashboardLayout from "./layouts/DashboardLayout";
@@ -24,6 +25,7 @@ import PayslipManagement from "./pages/admin/PayslipManagement.jsx";
 import AdminPayslipView from "./pages/admin/AdminPayslipView.jsx";
 import AdminNotifications from "./pages/admin/AdminNotifications.jsx";
 import AdminProfile from "./pages/admin/AdminProfile.jsx";
+import AdminDocuments from "./pages/admin/AdminDocuments.jsx";
 
 /* ================= ADMIN HEAD ================= */
 import AdminHeadLayout from "./pages/adminHead/AdminHeadLayout.jsx";
@@ -45,6 +47,7 @@ import ManagerTeam from "./pages/manager/ManagerTeam.jsx";
 import ManagerPayroll from "./pages/manager/ManagerPayroll.jsx";
 import ManagerNotifications from "./pages/manager/ManagerNotifications.jsx";
 import ManagerProfile from "./pages/manager/ManagerProfile.jsx";
+import ManagerDocuments from "./pages/manager/ManagerDocuments.jsx";
 
 import ManagerApproverLayout from "./pages/managerApprover/ManagerApproverLayout.jsx";
 import ManagerApproverDashboard from "./pages/managerApprover/ManagerApproverDashboard.jsx";
@@ -52,6 +55,7 @@ import ManagerApproverApprovals from "./pages/managerApprover/ManagerApproverApp
 import ManagerApproverTeam from "./pages/managerApprover/ManagerApproverTeam.jsx";
 import ManagerApproverPayroll from "./pages/managerApprover/ManagerApproverPayroll.jsx";
 import ManagerApproverNotifications from "./pages/managerApprover/ManagerApproverNotifications.jsx";
+import ManagerApproverDocuments from "./pages/managerApprover/ManagerApproverDocuments.jsx";
 
 /* ================= EMPLOYEE ================= */
 import EmployeeLayout from "./pages/employee/EmployeeLayout.jsx";
@@ -60,6 +64,7 @@ import EmployeeAttendance from "./pages/employee/EmployeeAttendance.jsx";
 import EmployeeLeaveManagement from "./pages/employee/EmployeeLeaveManagement.jsx";
 import MyProfile from "./pages/employee/profile/MyProfile.jsx";
 import EmployeePayslips from "./pages/employee/EmployeePayslips.jsx";
+import EmployeeDocuments from "./pages/employee/EmployeeDocuments.jsx";
 
 /* ✅ Sign In page (details fill page) */
 import EmployeeSignIn from "./pages/employee/EmployeeSignIn.jsx";
@@ -103,6 +108,7 @@ export default function App() {
         <Route path="payslips" element={<PayslipManagement basePath="/hr-dashboard" />} />
         <Route path="leave" element={<LeaveManagement />} />
         <Route path="attendance" element={<Attendance />} />
+        <Route path="documents" element={<HrDocuments />} />
         <Route path="notifications" element={<HrNotifications />} />
         <Route path="profile" element={<HrProfile />} />
         <Route path="people" element={<PeopleDirectory />} />
@@ -122,6 +128,7 @@ export default function App() {
         <Route path="attendance" element={<AdminAttendance />} />
         <Route path="leave" element={<AdminLeave />} />
         <Route path="payslips" element={<AdminPayslipView />} />
+        <Route path="documents" element={<AdminDocuments />} />
         <Route path="notifications" element={<AdminNotifications />} />
         <Route path="profile" element={<AdminProfile />} />
         <Route path="people" element={<PeopleDirectory />} />
@@ -155,6 +162,7 @@ export default function App() {
         <Route path="approvals" element={<ManagerApprovals />} />
         <Route path="team" element={<ManagerTeam />} />
         <Route path="payroll" element={<ManagerPayroll />} />
+        <Route path="documents" element={<ManagerDocuments />} />
         <Route path="notifications" element={<ManagerNotifications />} />
         <Route path="profile" element={<ManagerProfile />} />
       </Route>
@@ -173,6 +181,7 @@ export default function App() {
         <Route path="payroll" element={<ManagerApproverPayroll />} />
         <Route path="notifications" element={<ManagerApproverNotifications />} />
         <Route path="profile" element={<ManagerProfile />} />
+        <Route path="documents" element={<ManagerApproverDocuments />} />
       </Route>
 
       {/* ================= EMPLOYEE ================= */}
@@ -189,6 +198,7 @@ export default function App() {
         <Route path="profile" element={<MyProfile />} />
         <Route path="attendance" element={<EmployeeAttendance />} />
         <Route path="leave" element={<EmployeeLeaveManagement />} />
+        <Route path="documents" element={<EmployeeDocuments />} />
         <Route path="payslips" element={<EmployeePayslips />} />
         <Route path="notifications" element={<EmployeeNotifications />} />
         <Route path="settings" element={<EmployeeSettings />} />

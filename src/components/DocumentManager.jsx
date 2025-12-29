@@ -9,24 +9,23 @@ import {
   Search,
   Trash2,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { ensureRoleAuthSession } from "../lib/employeeAuthBridge";
 
 /* ===================== CONFIG ===================== */
 const DOCS_TABLE = "hrmss_documents";
 const BUCKET = "hrmss-documents";
-
-// optional role snapshot (admin/employee/hr/manager). If you pass role from pages, it will store.
 const ALLOWED_ROLES = new Set(["admin", "employee", "hr", "manager"]);
+const AUTH_KEY = "HRMSS_AUTH_SESSION";
+const LEGACY_EMP_SIGNIN_KEY = "hrmss.employee.signin";
 
 /* ===================== HELPERS ===================== */
 const formatBytes = (bytes) => {
   if (!bytes && bytes !== 0) return "-";
   const units = ["B", "KB", "MB", "GB"];
-  const idx = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1
-  );
+  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const val = bytes / Math.pow(1024, idx);
   return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 };
@@ -36,8 +35,7 @@ const getFileType = (file) => {
   if (t.includes("pdf")) return "PDF";
   if (t.includes("image")) return "IMAGE";
   if (t.includes("word") || t.includes("doc")) return "WORD";
-  if (t.includes("excel") || t.includes("sheet") || t.includes("xls"))
-    return "EXCEL";
+  if (t.includes("excel") || t.includes("sheet") || t.includes("xls")) return "EXCEL";
   return "FILE";
 };
 
@@ -71,7 +69,6 @@ const accentMap = {
 };
 
 const safeFileName = (name = "file") => {
-  // keep extensions; remove weird chars
   const n = name.replace(/[^\w.\-() ]+/g, "_").trim();
   return n.length ? n : "file";
 };
@@ -79,6 +76,59 @@ const safeFileName = (name = "file") => {
 const must = (v, msg) => {
   if (!v) throw new Error(msg);
   return v;
+};
+
+const readAuthCache = () => {
+  try {
+    const raw = localStorage.getItem(AUTH_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const readLegacyEmployeeSignin = () => {
+  try {
+    const raw = localStorage.getItem(LEGACY_EMP_SIGNIN_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveEffectiveRole = ({ roleProp, authCache } = {}) => {
+  const r = String(roleProp || authCache?.loginRole || authCache?.role || "").trim().toLowerCase();
+  return r || "";
+};
+
+const resolveEmployeeId = ({ authCache, legacyEmployeeSignin } = {}) => {
+  const empId = String(
+    authCache?.employee_id ||
+      authCache?.employeeId ||
+      authCache?.empId ||
+      authCache?.identifier ||
+      authCache?.id ||
+      legacyEmployeeSignin?.employee_id ||
+      legacyEmployeeSignin?.employeeId ||
+      legacyEmployeeSignin?.empId ||
+      legacyEmployeeSignin?.identifier ||
+      legacyEmployeeSignin?.id ||
+      ""
+  ).trim();
+  return empId || "";
+};
+
+const resolvePreferredEmail = ({ authCache, legacyEmployeeSignin } = {}) => {
+  const email = String(
+    authCache?.officialEmail ||
+      authCache?.official_email ||
+      authCache?.email ||
+      legacyEmployeeSignin?.officialEmail ||
+      legacyEmployeeSignin?.official_email ||
+      legacyEmployeeSignin?.email ||
+      ""
+  ).trim();
+  return email || undefined;
 };
 
 /* ===================== COMPONENT ===================== */
@@ -92,19 +142,13 @@ export default function DocumentManager({
   title = "Documents",
   subtitle,
   accent = "blue",
-  role, // optional role snapshot
-  categoryOptions = [
-    "Offer Letter",
-    "Payslip",
-    "Appointment Letter",
-    "HR Policy",
-    "Other",
-  ],
+  role,
+  categoryOptions = ["Offer Letter", "Payslip", "Appointment Letter", "HR Policy", "Other"],
 }) {
   const theme = accentMap[accent] || accentMap.blue;
   const fileRef = useRef(null);
 
-  const [docs, setDocs] = useState([]); // from DB
+  const [docs, setDocs] = useState([]);
   const [docTitle, setDocTitle] = useState("");
   const [category, setCategory] = useState(categoryOptions?.[0] || "Other");
   const [file, setFile] = useState(null);
@@ -113,18 +157,64 @@ export default function DocumentManager({
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+
+  /* ---------- AUTH: ensure Supabase session (employee bridge) ---------- */
+  const ensureDocsAuthSession = async () => {
+    const { data: sess, error: sessErr } = await supabase.auth.getSession();
+    if (sessErr) throw sessErr;
+    if (sess?.session?.user?.id) return sess.session.user;
+
+    const authCache = readAuthCache();
+    const legacyEmployeeSignin = readLegacyEmployeeSignin();
+    const effectiveRole = resolveEffectiveRole({ roleProp: role, authCache });
+
+    if (!ALLOWED_ROLES.has(effectiveRole)) return null;
+
+    const identifier =
+      effectiveRole === "employee"
+        ? resolveEmployeeId({ authCache, legacyEmployeeSignin })
+        : String(
+            authCache?.user_id ||
+              authCache?.userId ||
+              authCache?.id ||
+              authCache?.identifier ||
+              authCache?.email ||
+              ""
+          ).trim();
+
+    if (!identifier) return null;
+
+    const preferredEmail = resolvePreferredEmail({ authCache, legacyEmployeeSignin });
+    await ensureRoleAuthSession({ role: effectiveRole, identifier, preferredEmail });
+
+    const { data: sess2, error: sess2Err } = await supabase.auth.getSession();
+    if (sess2Err) throw sess2Err;
+    return sess2?.session?.user || null;
+  };
+
+  /* ---------- AUTH: get current user ---------- */
+  const getAuthedUser = async () => {
+    const user = await ensureDocsAuthSession();
+    if (user?.id) return user;
+
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    return data?.session?.user || null;
+  };
 
   /* ---------- LOAD DOCS ---------- */
   const loadDocs = async () => {
     try {
+      setErrMsg("");
       setLoading(true);
 
-      const { data: sessionData, error: sessionErr } =
-        await supabase.auth.getSession();
-      if (sessionErr) throw sessionErr;
-
-      const userId = sessionData?.session?.user?.id;
-      must(userId, "Please login to view documents.");
+      const user = await getAuthedUser();
+      if (!user?.id) {
+        setDocs([]);
+        setErrMsg("Please login (Supabase Auth) to view documents.");
+        return;
+      }
 
       const { data, error } = await supabase
         .from(DOCS_TABLE)
@@ -133,13 +223,11 @@ export default function DocumentManager({
 
       if (error) throw error;
 
-      // RLS already restricts to own docs, so no need to filter here
       setDocs((data || []).map(mapRowToUi));
     } catch (e) {
       console.error("loadDocs error:", e);
       setDocs([]);
-      // optional: show alert
-      // alert(e.message || "Failed to load documents");
+      setErrMsg(e?.message || "Failed to load documents");
     } finally {
       setLoading(false);
     }
@@ -148,17 +236,25 @@ export default function DocumentManager({
   useEffect(() => {
     loadDocs();
 
-    // realtime refresh (optional)
+    const {
+      data: { subscription: authSub },
+    } = supabase.auth.onAuthStateChange(() => {
+      loadDocs();
+    });
+
     const channel = supabase
       .channel("hrmss_documents_changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: DOCS_TABLE },
-        () => loadDocs()
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: DOCS_TABLE }, () => {
+        loadDocs();
+      })
       .subscribe();
 
     return () => {
+      try {
+        authSub?.unsubscribe();
+      } catch {
+        // noop
+      }
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,44 +271,33 @@ export default function DocumentManager({
   /* ---------- UPLOAD: Storage + DB ---------- */
   const upload = async () => {
     try {
-      if (!file || !docTitle) return alert("Title & file required");
+      setErrMsg("");
+      if (!file || !docTitle.trim()) return alert("Title & file required");
 
       setBusy(true);
 
-      const { data: sessionData, error: sessionErr } =
-        await supabase.auth.getSession();
-      if (sessionErr) throw sessionErr;
+      const user = await getAuthedUser();
+      must(user?.id, "Please login (Supabase Auth) to upload documents.");
 
-      const user = sessionData?.session?.user;
-      must(user?.id, "Please login to upload documents.");
       const userId = user.id;
-
       const fileName = safeFileName(file.name);
-      const ext = fileName.includes(".") ? fileName.split(".").pop() : "";
-      const typeGuess = getFileType(file);
-
-      // ✅ Path must start with auth.uid() folder for Storage RLS
       const stamp = Date.now();
+
+      // path must start with auth.uid() folder
       const storagePath = `${userId}/${stamp}_${fileName}`;
 
-      // 1) Upload to Storage
-      const { error: upErr } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: file.type || undefined,
-        });
-
+      // 1) upload to storage
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(storagePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || undefined,
+      });
       if (upErr) throw upErr;
 
-      // 2) Insert into DB
+      // 2) insert to db
       const payload = {
         user_id: userId,
-        role:
-          role && ALLOWED_ROLES.has(String(role).toLowerCase())
-            ? String(role).toLowerCase()
-            : null,
+        role: role && ALLOWED_ROLES.has(String(role).toLowerCase()) ? String(role).toLowerCase() : null,
         title: docTitle.trim(),
         category,
         file_name: fileName,
@@ -229,15 +314,12 @@ export default function DocumentManager({
         .single();
 
       if (insErr) {
-        // rollback storage if db insert failed
-        await supabase.storage.from(BUCKET).remove([storagePath]);
+        await supabase.storage.from(BUCKET).remove([storagePath]); // rollback
         throw insErr;
       }
 
-      // 3) Refresh list (or add inserted to top)
       setDocs((p) => [mapRowToUi(inserted), ...p]);
 
-      // reset form
       setDocTitle("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
@@ -245,7 +327,8 @@ export default function DocumentManager({
       alert("Document uploaded!");
     } catch (e) {
       console.error("upload error:", e);
-      alert(e.message || "Upload failed");
+      setErrMsg(e?.message || "Upload failed");
+      alert(e?.message || "Upload failed");
     } finally {
       setBusy(false);
     }
@@ -254,26 +337,26 @@ export default function DocumentManager({
   /* ---------- VIEW / DOWNLOAD: signed url ---------- */
   const openSignedUrl = async (doc, mode = "view") => {
     try {
+      setErrMsg("");
       setBusy(true);
+
+      const user = await getAuthedUser();
+      must(user?.id, "Please login (Supabase Auth) to access documents.");
+
       const { data, error } = await supabase.storage
         .from(doc.bucket || BUCKET)
-        .createSignedUrl(doc.storagePath, 60 * 10); // 10 minutes
+        .createSignedUrl(doc.storagePath, 60 * 10);
 
       if (error) throw error;
 
       const url = data?.signedUrl;
       must(url, "Failed to generate URL");
 
-      if (mode === "download") {
-        // download by opening in new tab; browser will handle based on headers
-        window.open(url, "_blank", "noopener,noreferrer");
-        return;
-      }
-
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
       console.error("signed url error:", e);
-      alert(e.message || "Failed to open file");
+      setErrMsg(e?.message || "Failed to open file");
+      alert(e?.message || "Failed to open file");
     } finally {
       setBusy(false);
     }
@@ -285,30 +368,23 @@ export default function DocumentManager({
     if (!ok) return;
 
     try {
+      setErrMsg("");
       setBusy(true);
 
-      // delete db row first (RLS ensures only own)
-      const { error: delErr } = await supabase
-        .from(DOCS_TABLE)
-        .delete()
-        .eq("id", doc.id);
+      const user = await getAuthedUser();
+      must(user?.id, "Please login (Supabase Auth) to delete documents.");
 
+      const { error: delErr } = await supabase.from(DOCS_TABLE).delete().eq("id", doc.id);
       if (delErr) throw delErr;
 
-      // delete file from storage (RLS ensures only own folder)
-      const { error: stoErr } = await supabase.storage
-        .from(doc.bucket || BUCKET)
-        .remove([doc.storagePath]);
-
-      if (stoErr) {
-        // not critical; db already removed
-        console.warn("storage remove error:", stoErr);
-      }
+      const { error: stoErr } = await supabase.storage.from(doc.bucket || BUCKET).remove([doc.storagePath]);
+      if (stoErr) console.warn("storage remove error:", stoErr);
 
       setDocs((p) => p.filter((d) => d.id !== doc.id));
     } catch (e) {
       console.error("remove error:", e);
-      alert(e.message || "Delete failed");
+      setErrMsg(e?.message || "Delete failed");
+      alert(e?.message || "Delete failed");
     } finally {
       setBusy(false);
     }
@@ -330,17 +406,13 @@ export default function DocumentManager({
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-          {subtitle ? (
-            <p className="text-xs text-slate-500">{subtitle}</p>
-          ) : null}
+          {subtitle ? <p className="text-xs text-slate-500">{subtitle}</p> : null}
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setView("table")}
-            className={`p-2 rounded-lg border ${
-              view === "table" ? theme.solid : "bg-white"
-            } ${theme.hover}`}
+            className={`p-2 rounded-lg border ${view === "table" ? theme.solid : "bg-white"} ${theme.hover}`}
             aria-label="Table view"
             type="button"
           >
@@ -348,9 +420,7 @@ export default function DocumentManager({
           </button>
           <button
             onClick={() => setView("grid")}
-            className={`p-2 rounded-lg border ${
-              view === "grid" ? theme.solid : "bg-white"
-            } ${theme.hover}`}
+            className={`p-2 rounded-lg border ${view === "grid" ? theme.solid : "bg-white"} ${theme.hover}`}
             aria-label="Grid view"
             type="button"
           >
@@ -358,6 +428,13 @@ export default function DocumentManager({
           </button>
         </div>
       </div>
+
+      {errMsg ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+          <AlertTriangle size={16} className="mt-0.5" />
+          <div className="min-w-0">{errMsg}</div>
+        </div>
+      ) : null}
 
       <div className="bg-white rounded-2xl border shadow-sm p-5">
         <div
@@ -377,11 +454,7 @@ export default function DocumentManager({
                 {formatBytes(file.size)} • {getFileType(file)}
               </div>
             </div>
-            <button
-              onClick={() => setFile(null)}
-              className="text-xs underline"
-              type="button"
-            >
+            <button onClick={() => setFile(null)} className="text-xs underline" type="button">
               Remove
             </button>
           </div>
@@ -421,6 +494,7 @@ export default function DocumentManager({
           ref={fileRef}
           className="hidden"
           onChange={pickFile}
+          accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.csv"
         />
       </div>
 
@@ -471,21 +545,13 @@ export default function DocumentManager({
                 <tr key={d.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex gap-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
-                          d.type
-                        )}`}
-                      >
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(d.type)}`}>
                         {d.type}
                       </span>
                       <div className="min-w-0">
                         <div className="font-semibold">{d.title}</div>
-                        <div className="text-xs text-gray-500 truncate">
-                          {d.fileName}
-                        </div>
-                        <div className="text-[11px] text-gray-400 mt-0.5">
-                          {d.date}
-                        </div>
+                        <div className="text-xs text-gray-500 truncate">{d.fileName}</div>
+                        <div className="text-[11px] text-gray-400 mt-0.5">{d.date}</div>
                       </div>
                     </div>
                   </td>
@@ -532,18 +598,12 @@ export default function DocumentManager({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.length === 0 ? (
-            <div className="rounded-2xl border bg-white p-6 text-sm text-gray-500">
-              No documents found
-            </div>
+            <div className="rounded-2xl border bg-white p-6 text-sm text-gray-500">No documents found</div>
           ) : null}
 
           {filtered.map((d) => (
             <div key={d.id} className="bg-white border rounded-2xl p-4 shadow-sm">
-              <span
-                className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
-                  d.type
-                )}`}
-              >
+              <span className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(d.type)}`}>
                 {d.type}
               </span>
               <h3 className="font-semibold truncate">{d.title}</h3>
@@ -552,28 +612,13 @@ export default function DocumentManager({
               <p className="text-[11px] text-gray-400 mt-2">{d.date}</p>
 
               <div className="flex justify-end gap-3 mt-4">
-                <button
-                  type="button"
-                  onClick={() => openSignedUrl(d, "view")}
-                  disabled={busy}
-                  title="View"
-                >
+                <button type="button" onClick={() => openSignedUrl(d, "view")} disabled={busy} title="View">
                   <Eye size={16} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => openSignedUrl(d, "download")}
-                  disabled={busy}
-                  title="Download"
-                >
+                <button type="button" onClick={() => openSignedUrl(d, "download")} disabled={busy} title="Download">
                   <Download size={16} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => remove(d)}
-                  disabled={busy}
-                  title="Delete"
-                >
+                <button type="button" onClick={() => remove(d)} disabled={busy} title="Delete">
                   <Trash2 size={16} className="text-rose-600" />
                 </button>
               </div>
@@ -583,8 +628,7 @@ export default function DocumentManager({
       )}
 
       <p className="text-xs text-gray-400">
-        Connected to Supabase (Storage + DB). Users will see only their own
-        documents (RLS).
+        Connected to Supabase (Storage + DB). Users will see only their own documents (RLS).
       </p>
     </section>
   );
@@ -592,15 +636,21 @@ export default function DocumentManager({
 
 /* ===================== MAPPER ===================== */
 function mapRowToUi(r) {
-  // r from hrmss_documents
   const fileName = r.file_name || "";
+  const lower = fileName.toLowerCase();
+
   const type =
-    (r.mime_type || "").includes("pdf") ? "PDF" : // fallback
-    fileName.toLowerCase().endsWith(".pdf") ? "PDF" :
-    fileName.toLowerCase().match(/\.(png|jpg|jpeg|webp|gif)$/) ? "IMAGE" :
-    fileName.toLowerCase().match(/\.(doc|docx)$/) ? "WORD" :
-    fileName.toLowerCase().match(/\.(xls|xlsx|csv)$/) ? "EXCEL" :
-    "FILE";
+    (r.mime_type || "").toLowerCase().includes("pdf")
+      ? "PDF"
+      : lower.endsWith(".pdf")
+      ? "PDF"
+      : lower.match(/\.(png|jpg|jpeg|webp|gif)$/)
+      ? "IMAGE"
+      : lower.match(/\.(doc|docx)$/)
+      ? "WORD"
+      : lower.match(/\.(xls|xlsx|csv)$/)
+      ? "EXCEL"
+      : "FILE";
 
   const dt = r.created_at ? new Date(r.created_at) : null;
 

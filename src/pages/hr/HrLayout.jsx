@@ -72,6 +72,7 @@ export default function HrLayout() {
             <SideItem to="/hr-dashboard/attendance" icon={ClipboardList} label="Attendance" />
             <SideItem to="/hr-dashboard/payroll" icon={WalletCards} label="Payroll" />
             <SideItem to="/hr-dashboard/payslips" icon={FileText} label="Payslips" />
+            <SideItem to="/hr-dashboard/documents" icon={FileText} label="Documents" />
             <SideItem to="/hr-dashboard/people" icon={UserRound} label="Birthday" />
           </nav>
 

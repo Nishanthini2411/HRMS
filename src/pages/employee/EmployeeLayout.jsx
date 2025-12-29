@@ -33,6 +33,7 @@ const tabs = [
   { to: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "attendance", icon: ClipboardCheck, label: "Attendance" },
   { to: "leave", icon: CalendarDays, label: "Leave" },
+  { to: "documents", icon: FileText, label: "Documents" },
   { to: "payslips", icon: FileText, label: "Payslips" },
   { to: "settings", icon: Settings, label: "Settings" },
   // { to: "/employee-dashboard/people", icon: UserRound, label: "People Directory" },

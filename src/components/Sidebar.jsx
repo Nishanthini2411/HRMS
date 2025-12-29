@@ -29,6 +29,9 @@ const Sidebar = () => {
         <NavLink to="/dashboard/payslips" className={linkClasses}>
           Payslips
         </NavLink>
+        <NavLink to="/dashboard/documents" className={linkClasses}>
+          Documents
+        </NavLink>
         <NavLink to="/dashboard/people" className={linkClasses}>
           Birthday
         </NavLink>
