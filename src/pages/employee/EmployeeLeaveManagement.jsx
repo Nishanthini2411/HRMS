@@ -3,7 +3,6 @@ import { Eye, Pencil, Plus, X } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 
 /* ---------------- CONSTANTS ---------------- */
-const EMP = { id: "EMP-001", name: "Priya Sharma" };
 const LEAVES_TABLE = "hrmss_leave_requests";
 
 const leaveTypes = [
@@ -49,16 +48,128 @@ const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
 const shortTime = (t) => {
   if (!t) return "";
   const s = String(t);
-  // "09:00:00" / "09:00:00+00" => "09:00"
   return s.length >= 5 ? s.slice(0, 5) : s;
 };
 
-/* ---------------- APPROVER TABLE (Request To) ----------------
-  ✅ We will fetch approvers ONLY from this table:
-  public.hrmss_approvers
-  Columns expected: id, name, role, access, active
-  We show only: access='approver' AND active=true
-*/
+/* ---------------- ✅ CURRENT EMPLOYEE FROM STORAGE (FIX) ---------------- */
+const safeJson = (v) => {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
+};
+
+const normalizeUser = (obj, fallback) => {
+  if (!obj || typeof obj !== "object") return fallback;
+
+  const id =
+    obj.id ||
+    obj.employee_id ||
+    obj.employeeId ||
+    obj.emp_id ||
+    obj.empId ||
+    obj.user_id ||
+    obj.userId ||
+    obj.identifier ||
+    fallback.id;
+
+  const name =
+    obj.name ||
+    obj.employee_name ||
+    obj.employeeName ||
+    obj.full_name ||
+    obj.fullName ||
+    obj.username ||
+    obj.user_name ||
+    fallback.name;
+
+  return { id: String(id || fallback.id), name: String(name || fallback.name) };
+};
+
+const getEmployeeFromStorage = (fallback) => {
+  if (typeof window === "undefined") return fallback;
+
+  // ✅ include your known keys + your previous cache key pattern
+  const likelyKeys = [
+    "hrmss.session",
+    "hrmss.auth",
+    "hrmss.user",
+    "hrmss.employee",
+    "hrmss.employee.session",
+    "employee_session",
+    "employeeSession",
+    "EMPLOYEE_SESSION",
+    "HRMSS_AUTH_SESSION", // (if you stored like this)
+  ];
+
+  const matchesEmployeeRole = (o) => {
+    const role =
+      (o?.role || o?.userRole || o?.type || o?.user_type || o?.userType || "")
+        .toString()
+        .toLowerCase();
+    if (!role) return null;
+    if (role.includes("employee")) return true;
+    return null;
+  };
+
+  // 1) try known keys
+  for (const k of likelyKeys) {
+    const raw = window.localStorage.getItem(k);
+    if (!raw) continue;
+    const parsed = safeJson(raw);
+
+    const candidates = [parsed, parsed?.user, parsed?.profile, parsed?.data];
+    for (const c of candidates) {
+      if (!c) continue;
+      if (matchesEmployeeRole(c) === true) return normalizeUser(c, fallback);
+    }
+
+    // if role not present, still try by ID prefix
+    if (parsed && typeof parsed === "object") {
+      const u = normalizeUser(parsed?.user || parsed, fallback);
+      if ((u.id || "").toUpperCase().startsWith("EMP")) return u;
+    }
+  }
+
+  // 2) scan all localStorage (best effort)
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+
+      // ✅ also detect your cache pattern if present
+      // hrmss.profile.cache.employee.<employee_id>
+      if (key.startsWith("hrmss.profile.cache.employee.")) {
+        const raw = window.localStorage.getItem(key);
+        const parsed = safeJson(raw);
+        if (parsed && typeof parsed === "object") {
+          const u = normalizeUser(parsed, fallback);
+          if ((u.id || "").toUpperCase().startsWith("EMP")) return u;
+        }
+      }
+
+      const raw = window.localStorage.getItem(key);
+      const parsed = safeJson(raw);
+      if (!parsed || typeof parsed !== "object") continue;
+
+      const candidates = [parsed, parsed?.user, parsed?.profile, parsed?.data];
+      for (const c of candidates) {
+        if (!c) continue;
+        if (matchesEmployeeRole(c) === true) return normalizeUser(c, fallback);
+      }
+
+      const u = normalizeUser(parsed?.user || parsed, fallback);
+      if ((u.id || "").toUpperCase().startsWith("EMP")) return u;
+    }
+  } catch {
+    // ignore
+  }
+
+  return fallback;
+};
+
+/* ---------------- APPROVER TABLE (Request To) ---------------- */
 const APPROVER_TABLE = "hrmss_approvers";
 
 /* ---------------- MODAL ---------------- */
@@ -97,6 +208,16 @@ const TimePreset = ({ onMorning, onAfternoon }) => (
 
 /* ---------------- MAIN ---------------- */
 export default function EmployeeLeaveManagement() {
+  // ✅ dynamic employee (so each employee sees only their own)
+  const EMP = useMemo(
+    () =>
+      getEmployeeFromStorage({
+        id: "EMP-001",
+        name: "Priya Sharma",
+      }),
+    []
+  );
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -168,7 +289,7 @@ export default function EmployeeLeaveManagement() {
       .from(LEAVES_TABLE)
       .select("*")
       .eq("owner_role", "employee")
-      .eq("owner_id", EMP.id)
+      .eq("owner_id", EMP.id) // ✅ THIS is the key filter (now EMP is dynamic)
       .order("applied_at", { ascending: false });
 
     if (error) {
@@ -207,7 +328,7 @@ export default function EmployeeLeaveManagement() {
       await fetchLeaves();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [EMP.id]);
 
   /* ---------------- STATS ---------------- */
   const stats = useMemo(
@@ -258,8 +379,8 @@ export default function EmployeeLeaveManagement() {
 
     const payload = {
       owner_role: "employee",
-      owner_id: EMP.id,
-      owner_name: EMP.name,
+      owner_id: EMP.id,       // ✅ dynamic
+      owner_name: EMP.name,   // ✅ dynamic
 
       leave_type: cType,
       mode: cMode,
@@ -352,6 +473,9 @@ export default function EmployeeLeaveManagement() {
           <div>
             <h2 className="text-xl font-semibold">Leave Management</h2>
             <p className="text-sm text-slate-300">Full Day · Half Day · Permission</p>
+            <p className="text-xs text-slate-300 mt-1">
+              Logged in: <span className="font-semibold">{EMP.name}</span> • {EMP.id}
+            </p>
           </div>
           <button
             onClick={() => setCreateOpen(true)}
@@ -814,29 +938,3 @@ export default function EmployeeLeaveManagement() {
   );
 }
 
-/*
-✅ DB REQUIRED:
-hrmss_leave_requests must have at least:
-- owner_role (text)
-- owner_id (text)
-- owner_name (text)
-- leave_type (text)
-- mode (text)
-- from_date (date/text)
-- to_date (date/text)
-- time_from (time/text, nullable)
-- time_to (time/text, nullable)
-- hours (text, nullable)
-- reason (text)
-- status (text)
-- applied_at (timestamptz, default now())
-- request_to_id (text)
-- request_to_name (text)
-- request_to_role (text)
-
-✅ Approver dropdown source:
-hrmss_approvers must have:
-- id, name, role, access, active
-And data like:
-access='approver', active=true
-*/
