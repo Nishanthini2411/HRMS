@@ -28,13 +28,13 @@ const ALLOWED_SOURCES = [
 ];
 
 const SOURCE_ROUTE = {
-  Employees: "/hr/employees",
-  Attendance: "/hr/attendance",
-  LeaveManagement: "/hr/leave",
-  Payroll: "/hr/payroll",
-  Documents: "/hr/documents",
-  "My Profile": "/hr/profile",
-  Birthday: "/hr/birthday",
+  Employees: "/hr-dashboard?tab=employees",
+  Attendance: "/hr-dashboard/attendance",
+  LeaveManagement: "/hr-dashboard/leave",
+  Payroll: "/hr-dashboard/payroll",
+  Documents: "/hr-dashboard/documents",
+  "My Profile": "/hr-dashboard/profile",
+  Birthday: "/hr-dashboard/people",
 };
 
 /** ✅ Row cards */
@@ -430,7 +430,7 @@ export default function HrNotifications() {
   };
 
   const goToSource = (n) => {
-    const route = n.route || SOURCE_ROUTE[n.source] || "/hr";
+    const route = n.route || SOURCE_ROUTE[n.source] || "/hr-dashboard";
     navigate(route, { state: { fromNotification: n, notifId: n.id } });
   };
 

@@ -14,6 +14,8 @@ import {
   UserRound,
 } from "lucide-react";
 
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
+
 const SideItem = ({ to, icon: Icon, label, end }) => (
   <NavLink
     to={to}
@@ -46,6 +48,13 @@ const items = [
 
 export default function AdminHeadLayout() {
   const navigate = useNavigate();
+  const handleLogout = () => {
+    try {
+      sessionStorage.removeItem(DOCS_AUTH_KEY);
+    } catch {}
+    localStorage.removeItem(DOCS_AUTH_KEY);
+    navigate("/login");
+  };
   return (
     <div className="min-h-screen bg-slate-50 flex">
       <aside className="w-[280px] bg-white border-r sticky top-0 h-screen">
@@ -61,7 +70,7 @@ export default function AdminHeadLayout() {
           </nav>
           <div className="p-4 border-t">
             <button
-              onClick={() => navigate("/login")}
+              onClick={handleLogout}
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-black transition"
             >
               Logout

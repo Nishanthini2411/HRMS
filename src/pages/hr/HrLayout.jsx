@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LayoutDashboard, CalendarDays, ClipboardList, LogOut, UserRound, Bell, WalletCards, FileText, Menu } from "lucide-react";
 
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
+
 const SideItem = ({ to, icon: Icon, label, end }) => (
   <NavLink
     to={to}
@@ -30,6 +32,10 @@ export default function HrLayout() {
   }, [navigate]);
 
   const handleLogout = () => {
+    try {
+      sessionStorage.removeItem(DOCS_AUTH_KEY);
+    } catch {}
+    localStorage.removeItem(DOCS_AUTH_KEY);
     navigate("/login");
   };
 

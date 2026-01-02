@@ -1,5 +1,6 @@
 // ✅ File: src/pages/hr/HrHome.jsx
 import { useMemo, useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Search,
   Users,
@@ -139,6 +140,8 @@ const statusPill = (status) => {
 };
 
 const dotClass = (status) => (status === "Active" ? "bg-sky-500" : "bg-rose-500");
+
+const TAB_VALUES = new Set(["all", "admins", "employees"]);
 
 const SortIcon = ({ active, dir }) => {
   if (!active) return <ArrowUpDown size={14} className="opacity-70" />;
@@ -338,7 +341,10 @@ const tonePill = (t) => {
 
 /* ---------------- PAGE ---------------- */
 export default function HrHome() {
-  const [tab, setTab] = useState("all");
+  const [searchParams] = useSearchParams();
+  const tabParam = (searchParams.get("tab") || "").toLowerCase();
+  const initialTab = TAB_VALUES.has(tabParam) ? tabParam : "all";
+  const [tab, setTab] = useState(initialTab);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("name");

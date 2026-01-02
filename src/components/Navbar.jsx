@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
 const COMPLETION_KEY = "hrmss.signin.completed.admin";
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 
 const linkClasses = ({ isActive }) =>
   `inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${
@@ -24,6 +25,10 @@ const Navbar = ({ isSidebarOpen = true, onToggleSidebar }) => {
 
     localStorage.removeItem(AUTH_KEY);
     localStorage.removeItem(COMPLETION_KEY);
+    try {
+      sessionStorage.removeItem(DOCS_AUTH_KEY);
+    } catch {}
+    localStorage.removeItem(DOCS_AUTH_KEY);
     navigate("/login", { replace: true });
   };
 

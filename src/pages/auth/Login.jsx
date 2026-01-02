@@ -15,6 +15,8 @@ import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { MANAGER_SESSION_KEY } from "../manager/managerData";
 import { ensureAdminSupabaseSession } from "../../lib/employeeAuthBridge";
 
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
+
 /**
  * IMPORTANT (for Documents Upload):
  * Supabase Storage/Table policies usually need a Supabase Auth session (auth.uid()).
@@ -80,7 +82,7 @@ export default function Login() {
   const adminIdRef = useRef(null);
   const adminPassRef = useRef(null);
 
-  const empIdRef = useRef(null);
+  const empEmailRef = useRef(null);
   const empPassRef = useRef(null);
 
   const roleTitle = useMemo(() => {
@@ -95,7 +97,7 @@ export default function Login() {
       if (role === "hr") hrEmailRef.current?.focus();
       if (role === "manager") managerEmailRef.current?.focus();
       if (role === "admin") adminUserRef.current?.focus();
-      if (role === "employee") empIdRef.current?.focus();
+      if (role === "employee") empEmailRef.current?.focus();
     }, 0);
     return () => clearTimeout(t);
   }, [role]);
@@ -113,7 +115,7 @@ export default function Login() {
     if (adminIdRef.current) adminIdRef.current.value = "";
     if (adminPassRef.current) adminPassRef.current.value = "";
 
-    if (empIdRef.current) empIdRef.current.value = "";
+    if (empEmailRef.current) empEmailRef.current.value = "";
     if (empPassRef.current) empPassRef.current.value = "";
   };
 
@@ -234,7 +236,7 @@ export default function Login() {
     return data;
   };
 
-  // ✅ EMPLOYEE login RPC (ONLY admin-created id/password works)
+  // ✅ EMPLOYEE login RPC (uses employee_id from employee accounts)
   const rpcEmployeeLogin = async ({ p_employee_id, p_password }) => {
     if (!isSupabaseConfigured) {
       throw new Error(
@@ -248,10 +250,10 @@ export default function Login() {
     });
 
     if (error) throw new Error(error.message || "Employee login failed");
-    if (!data) throw new Error("Invalid Employee ID / Password");
+    if (!data) throw new Error("Invalid employee credentials");
 
     if (data?.ok === false) {
-      throw new Error(data?.error || "Invalid Employee ID / Password");
+      throw new Error(data?.error || "Invalid employee credentials");
     }
 
     if (data?.ok === true && data?.employee) {
@@ -259,6 +261,35 @@ export default function Login() {
     }
 
     return data;
+  };
+
+  const resolveEmployeeFromIdentifier = async (identifier) => {
+    const raw = String(identifier || "").trim();
+    if (!raw) return { employeeId: "", preferredEmail: "" };
+
+    if (!raw.includes("@")) {
+      return { employeeId: raw, preferredEmail: "" };
+    }
+
+    if (!isSupabaseConfigured) {
+      throw new Error(
+        "Supabase env missing. Employee email lookup cannot be verified."
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("hrmss_employees")
+      .select("employee_id, email")
+      .ilike("email", raw)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message || "Employee email lookup failed");
+    if (!data?.employee_id) throw new Error("Employee email not found");
+
+    return {
+      employeeId: String(data.employee_id || "").trim(),
+      preferredEmail: data.email || raw,
+    };
   };
 
   // ✅ EMPLOYEE: check profile COMPLETED (must be profile_completed=true)
@@ -295,9 +326,27 @@ export default function Login() {
 
   /* ---------------- SUPABASE AUTH BRIDGE (FOR DOCUMENTS) ---------------- */
 
+  const persistDocsAuth = (params) => {
+    if (!params?.password) return;
+    const payload = {
+      role: params?.role || "",
+      identifier: params?.identifier || "",
+      preferredEmail: params?.preferredEmail || "",
+      password: params?.password || "",
+    };
+    try {
+      sessionStorage.setItem(DOCS_AUTH_KEY, JSON.stringify(payload));
+    } catch {
+      try {
+        localStorage.setItem(DOCS_AUTH_KEY, JSON.stringify(payload));
+      } catch {}
+    }
+  };
+
   // ✅ Don’t break app login if bridge fails; only show a clear message.
   const tryEnsureSupabaseForDocs = async (params, roleLabelForError = "") => {
     try {
+      persistDocsAuth(params);
       await ensureAdminSupabaseSession(params);
 
       // mark ok (optional)
@@ -339,7 +388,7 @@ export default function Login() {
     const adminId = adminIdRef.current?.value?.trim() || "";
     const adminPassword = adminPassRef.current?.value?.trim() || "";
 
-    const empId = empIdRef.current?.value?.trim() || "";
+    const empEmail = empEmailRef.current?.value?.trim() || "";
     const empPassword = empPassRef.current?.value?.trim() || "";
 
     try {
@@ -569,17 +618,27 @@ export default function Login() {
 
       // ✅ EMPLOYEE
       if (role === "employee") {
-        if (!empId || !empPassword) {
-          setErr("Enter employee id and password");
+        if (!empEmail || !empPassword) {
+          setErr("Enter employee email and password");
+          return;
+        }
+
+        const {
+          employeeId: resolvedEmployeeId,
+          preferredEmail: emailFromLookup,
+        } = await resolveEmployeeFromIdentifier(empEmail);
+
+        if (!resolvedEmployeeId) {
+          setErr("Employee email not found");
           return;
         }
 
         const emp = await rpcEmployeeLogin({
-          p_employee_id: empId,
+          p_employee_id: resolvedEmployeeId,
           p_password: empPassword,
         });
 
-        const employeeId = String(emp.employee_id || empId).trim();
+        const employeeId = String(emp.employee_id || resolvedEmployeeId).trim();
 
         // preferredEmail (if your employee table has official email, use it)
         const preferredEmail =
@@ -587,8 +646,11 @@ export default function Login() {
           emp?.officialEmail ||
           emp?.email ||
           emp?.work_email ||
+          emailFromLookup ||
           // ✅ stable shadow email (IMPORTANT: don’t use date-based; use employeeId)
-          `${employeeId.toLowerCase()}@employee.twite.local`;
+          (empEmail.includes("@")
+            ? empEmail
+            : `${employeeId.toLowerCase()}@employee.twite.local`);
 
         // store auth cache
         localStorage.setItem(
@@ -660,7 +722,7 @@ export default function Login() {
     const adminId = adminIdRef.current?.value?.trim() || "";
     const adminPassword = adminPassRef.current?.value?.trim() || "";
 
-    const empId = empIdRef.current?.value?.trim() || "";
+    const empEmail = empEmailRef.current?.value?.trim() || "";
     const empPassword = empPassRef.current?.value?.trim() || "";
 
     try {
@@ -784,23 +846,36 @@ export default function Login() {
 
       // ✅ EMPLOYEE sign-in button
       if (role === "employee") {
-        if (!empId || !empPassword) {
-          setErr("Enter employee id and password");
+        if (!empEmail || !empPassword) {
+          setErr("Enter employee email and password");
+          return;
+        }
+
+        const {
+          employeeId: resolvedEmployeeId,
+          preferredEmail: emailFromLookup,
+        } = await resolveEmployeeFromIdentifier(empEmail);
+
+        if (!resolvedEmployeeId) {
+          setErr("Employee email not found");
           return;
         }
 
         const emp = await rpcEmployeeLogin({
-          p_employee_id: empId,
+          p_employee_id: resolvedEmployeeId,
           p_password: empPassword,
         });
 
-        const employeeId = String(emp.employee_id || empId).trim();
+        const employeeId = String(emp.employee_id || resolvedEmployeeId).trim();
         const preferredEmail =
           emp?.official_email ||
           emp?.officialEmail ||
           emp?.email ||
           emp?.work_email ||
-          `${employeeId.toLowerCase()}@employee.twite.local`;
+          emailFromLookup ||
+          (empEmail.includes("@")
+            ? empEmail
+            : `${employeeId.toLowerCase()}@employee.twite.local`);
 
         localStorage.setItem(
           "HRMSS_AUTH_SESSION",
@@ -1018,11 +1093,11 @@ export default function Login() {
                 {role === "employee" && (
                   <>
                     <Field
-                      ref={empIdRef}
-                      icon={IdCard}
-                      type="text"
-                      placeholder="Enter your employee id"
-                      autoComplete="off"
+                      ref={empEmailRef}
+                      icon={Mail}
+                      type="email"
+                      placeholder="Enter your email"
+                      autoComplete="email"
                       required
                     />
                     <Field

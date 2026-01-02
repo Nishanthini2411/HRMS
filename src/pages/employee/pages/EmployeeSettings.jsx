@@ -1,12 +1,7 @@
-import { useState } from "react";
-import {
-  Bell,
-  Lock,
-  Check,
-  Eye,
-  EyeOff,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Lock, Check, Eye, EyeOff } from "lucide-react";
 import { SectionCard } from "../shared/ui.jsx";
+import { supabase } from "../../../lib/supabaseClient"; // ✅ path correct pannunga
 
 export default function EmployeeSettings() {
   const [settings, setSettings] = useState({
@@ -16,21 +11,101 @@ export default function EmployeeSettings() {
     payroll: true,
   });
 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const toggle = (key) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // ✅ Page open aagum pothu DB la irunthu settings load pannum
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  async function fetchSettings() {
+    try {
+      setLoading(true);
+
+      // ✅ current supabase auth user
+      const { data: sess, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+
+      const user = sess?.session?.user;
+      if (!user) {
+        // Auth session illaina defaults thaan
+        setLoading(false);
+        return;
+      }
+
+      // ✅ settings row fetch
+      const { data, error } = await supabase
+        .from("employee_settings")
+        .select("attendance, leave, documents, payroll")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      // ✅ row iruntha apply pannum
+      if (data) setSettings(data);
+    } catch (e) {
+      console.error("fetchSettings error:", e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ✅ Save button click panna DB ku upsert (insert/update)
+  async function saveSettings() {
+    try {
+      setSaving(true);
+
+      const { data: sess, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+
+      const user = sess?.session?.user;
+      if (!user) {
+        alert("Supabase Auth session illa. (RLS block aagum)");
+        return;
+      }
+
+      const payload = {
+        user_id: user.id,
+        attendance: !!settings.attendance,
+        leave: !!settings.leave,
+        documents: !!settings.documents,
+        payroll: !!settings.payroll,
+      };
+
+      const { error } = await supabase
+        .from("employee_settings")
+        .upsert(payload, { onConflict: "user_id" });
+
+      if (error) throw error;
+
+      alert("Settings Updated ✅");
+    } catch (e) {
+      console.error("saveSettings error:", e);
+      alert("Update Failed ❌");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-
       {/* HEADER */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
         <p className="text-sm text-slate-500">
           Manage notification preferences and security
         </p>
+        {loading && (
+          <p className="mt-2 text-sm text-slate-500">Loading from Supabase...</p>
+        )}
       </div>
 
       {/* NOTIFICATIONS */}
@@ -65,10 +140,7 @@ export default function EmployeeSettings() {
       </SectionCard>
 
       {/* SECURITY */}
-      <SectionCard
-        title="Security"
-        subtitle="Update your account password"
-      >
+      <SectionCard title="Security" subtitle="Update your account password">
         <button
           onClick={() => setShowPasswordModal(true)}
           className="flex items-center gap-2 rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
@@ -80,9 +152,13 @@ export default function EmployeeSettings() {
 
       {/* SAVE */}
       <div className="flex justify-end">
-        <button className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm text-white">
+        <button
+          onClick={saveSettings}
+          disabled={loading || saving}
+          className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm text-white disabled:opacity-60"
+        >
           <Check size={16} />
-          Save Changes
+          {saving ? "Updating..." : "Save Changes"}
         </button>
       </div>
 
@@ -101,9 +177,7 @@ function ToggleRow({ icon: Icon, label, checked, onChange }) {
     <div className="flex items-center justify-between py-3 border-b last:border-b-0">
       <div className="flex items-center gap-3">
         <Icon size={18} className="text-slate-500" />
-        <span className="text-sm font-medium text-slate-800">
-          {label}
-        </span>
+        <span className="text-sm font-medium text-slate-800">{label}</span>
       </div>
 
       <button
@@ -122,23 +196,89 @@ function ToggleRow({ icon: Icon, label, checked, onChange }) {
   );
 }
 
-/* ---------------- CHANGE PASSWORD MODAL ---------------- */
+/* ---------------- CHANGE PASSWORD MODAL (Supabase Auth) ---------------- */
 
 function ChangePasswordModal({ onClose }) {
   const [show, setShow] = useState(false);
 
+  const [form, setForm] = useState({
+    current: "",
+    next: "",
+    confirm: "",
+  });
+
+  const [saving, setSaving] = useState(false);
+
+  const setVal = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  async function updatePassword() {
+    try {
+      if (!form.current || !form.next || !form.confirm)
+        return alert("Fill all fields");
+      if (form.next !== form.confirm) return alert("Confirm mismatch");
+      if (form.next.length < 6)
+        return alert("New password min 6 characters");
+
+      setSaving(true);
+
+      const { data: sess, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+
+      const user = sess?.session?.user;
+      if (!user?.email) return alert("Auth user/email இல்லை");
+
+      // ✅ current password verify (re-login)
+      const { error: reErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: form.current,
+      });
+      if (reErr) return alert("Current password wrong ❌");
+
+      // ✅ update password
+      const { error: upErr } = await supabase.auth.updateUser({
+        password: form.next,
+      });
+      if (upErr) throw upErr;
+
+      alert("Password Updated ✅");
+      onClose();
+    } catch (e) {
+      console.error("updatePassword error:", e);
+      alert("Password update failed ❌");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4">
-
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">Change Password</h2>
           <button onClick={onClose}>✕</button>
         </div>
 
-        <PasswordInput label="Current Password" show={show} setShow={setShow} />
-        <PasswordInput label="New Password" show={show} setShow={setShow} />
-        <PasswordInput label="Confirm New Password" show={show} setShow={setShow} />
+        <PasswordInput
+          label="Current Password"
+          show={show}
+          setShow={setShow}
+          value={form.current}
+          onChange={(v) => setVal("current", v)}
+        />
+        <PasswordInput
+          label="New Password"
+          show={show}
+          setShow={setShow}
+          value={form.next}
+          onChange={(v) => setVal("next", v)}
+        />
+        <PasswordInput
+          label="Confirm New Password"
+          show={show}
+          setShow={setShow}
+          value={form.confirm}
+          onChange={(v) => setVal("confirm", v)}
+        />
 
         <div className="flex justify-end gap-3 pt-2">
           <button
@@ -147,8 +287,12 @@ function ChangePasswordModal({ onClose }) {
           >
             Cancel
           </button>
-          <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm text-white">
-            Update Password
+          <button
+            onClick={updatePassword}
+            disabled={saving}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-60"
+          >
+            {saving ? "Updating..." : "Update Password"}
           </button>
         </div>
       </div>
@@ -156,12 +300,14 @@ function ChangePasswordModal({ onClose }) {
   );
 }
 
-function PasswordInput({ label, show, setShow }) {
+function PasswordInput({ label, show, setShow, value, onChange }) {
   return (
     <div>
       <label className="text-xs text-slate-500">{label}</label>
       <div className="relative mt-1">
         <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           type={show ? "text" : "password"}
           className="w-full rounded-xl border px-3 py-2 pr-10 text-sm"
         />

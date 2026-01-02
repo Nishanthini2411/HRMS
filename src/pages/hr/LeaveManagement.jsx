@@ -6,6 +6,9 @@ import { supabase } from "../../lib/supabaseClient";
 const APPROVERS_TABLE = "hrmss_approvers";
 const LEAVES_TABLE = "hrmss_leave_requests";
 
+// ✅ ADD: Admin leaves table (your admin page inserts here)
+const ADMIN_LEAVES_TABLE = "admin_leaves";
+
 // ✅ demo HR (later read from auth/session)
 const currentHR = { id: "HR-001", name: "HR" };
 
@@ -36,6 +39,48 @@ const shortTime = (t) => {
   if (!t) return "";
   const s = String(t);
   return s.length >= 5 ? s.slice(0, 5) : s;
+};
+
+/* ✅ NEW: format date as DD-MM-YYYY everywhere */
+const pad2 = (n) => String(n).padStart(2, "0");
+
+const fmtDMY = (v) => {
+  if (!v) return "-";
+  const s = String(v);
+
+  // handles "YYYY-MM-DD" and "YYYY-MM-DDTHH:mm:ss..."
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return s;
+
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+};
+
+/* ✅ UPDATED: AppliedAt date also DD-MM-YYYY */
+const fmtDT = (iso) => {
+  if (!iso) return { date: "-", time: "-" };
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return { date: "-", time: "-" };
+
+  const date = fmtDMY(iso);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return { date, time };
+};
+
+/* ✅ NEW: Half day label + fixed timings you asked */
+const halfDayLabel = (mode, timeFrom) => {
+  if (!isHalfDay(mode)) return "";
+  const tf = shortTime(timeFrom);
+  if (!tf) return "Half Day";
+
+  const h = Number(tf.split(":")[0] || 0);
+  if (!Number.isFinite(h)) return "Half Day";
+
+  // before 14:00 => first half, else second half
+  if (h < 14) return "First Half (09:00 to 13:30)";
+  return "Second Half (14:00 to 17:30)";
 };
 
 const calcDuration = (from, to) => {
@@ -84,14 +129,6 @@ const roleBadge = (role) => {
   return `${base} bg-gray-50 text-gray-700 border-gray-200`; // hr
 };
 
-const fmtDT = (iso) => {
-  if (!iso) return { date: "-", time: "-" };
-  const d = new Date(iso);
-  const date = d.toLocaleDateString();
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return { date, time };
-};
-
 const initials = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const a = parts[0]?.[0] || "U";
@@ -100,21 +137,24 @@ const initials = (name = "") => {
 };
 
 /* ===================== UI bits ===================== */
-const TimePreset = ({ onMorning, onAfternoon }) => (
+/* ✅ UPDATED: Half day buttons show First/Second Half with your exact timings */
+const TimePreset = ({ mode, onMorning, onAfternoon }) => (
   <div className="flex gap-2 flex-wrap">
     <button
       type="button"
       onClick={onMorning}
       className="px-3 py-1 text-xs border rounded-lg hover:bg-slate-50"
     >
-      Morning (09:00 - 13:00)
+      {isHalfDay(mode) ? "First Half (09:00 - 13:30)" : "Morning (09:00 - 13:00)"}
     </button>
     <button
       type="button"
       onClick={onAfternoon}
       className="px-3 py-1 text-xs border rounded-lg hover:bg-slate-50"
     >
-      Afternoon (13:00 - 17:00)
+      {isHalfDay(mode)
+        ? "Second Half (14:00 - 17:30)"
+        : "Afternoon (13:00 - 17:00)"}
     </button>
   </div>
 );
@@ -177,24 +217,29 @@ export default function LeaveManagement() {
   /* ---------------- FETCH REQUESTS ---------------- */
   const fetchRequests = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+
+    // ✅ 1) existing HRMSS unified requests
+    const p1 = supabase
       .from(LEAVES_TABLE)
       .select("*")
       .order("applied_at", { ascending: false });
 
-    if (error) {
-      console.warn(error.message);
-      setRequests([]);
-      setLoading(false);
-      return;
-    }
+    // ✅ 2) admin leaves (your separate table)
+    const p2 = supabase
+      .from(ADMIN_LEAVES_TABLE)
+      .select("*")
+      .order("applied_at", { ascending: false });
 
-    const mapped = (data || []).map((r) => {
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    if (r1.error) console.warn(r1.error.message);
+    if (r2.error) console.warn(r2.error.message);
+
+    const list1 = (r1.data || []).map((r) => {
       const mode = (r.mode ?? "").toString();
       const fromDate = r.from_date;
-      const toDate = r.to_date || r.from_date; // ✅ safe fallback
+      const toDate = r.to_date || r.from_date;
 
-      // NOTE: time_from/time_to might come as "09:00:00" or "09:00:00+00"
       const tf = shortTime(r.time_from);
       const tt = shortTime(r.time_to);
 
@@ -226,7 +271,48 @@ export default function LeaveManagement() {
       };
     });
 
-    setRequests(mapped);
+    const list2 = (r2.data || []).map((r) => {
+      const mode = (r.mode ?? "").toString();
+      const fromDate = r.from_date;
+      const toDate = r.to_date || r.from_date;
+
+      const tf = shortTime(r.time_from);
+      const tt = shortTime(r.time_to);
+
+      return {
+        id: r.id,
+
+        ownerRole: "admin",
+        ownerId: r.admin_id,
+        ownerName: r.admin_name,
+
+        requestToId: currentHR.id,
+        requestToName: currentHR.name,
+        requestToRole: "hr",
+
+        leaveType: r.leave_type,
+        mode,
+        from: fromDate,
+        to: toDate,
+        timeFrom: tf,
+        timeTo: tt,
+        hours: r.hours || (needsTime(mode) ? calcDuration(tf, tt) : null),
+
+        reason: r.reason,
+        status: r.status,
+        appliedAt: r.applied_at,
+
+        decisionNote: "",
+        decidedAt: "",
+        decidedBy: "",
+      };
+    });
+
+    const merged = [...list1, ...list2].sort(
+      (a, b) => new Date(b.appliedAt) - new Date(a.appliedAt)
+    );
+
+    setRequests(merged);
     setLoading(false);
   };
 
@@ -320,13 +406,25 @@ export default function LeaveManagement() {
     fetchRequests();
   };
 
+  /* ✅ NEW: Summary-card click => set the Status filter and show true details */
+  const onSummaryClick = (next) => {
+    // keep your logic; only changing filter value
+    setStatusFilter(next); // "All" | "Pending" | "Approved" | "Rejected"
+    // optional: scroll to table for better UX
+    // document.getElementById("leave-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const summaryCardClass = (active) =>
+    `bg-white border rounded-xl p-3 text-left transition cursor-pointer hover:bg-gray-50 ${
+      active ? "ring-4 ring-purple-100 border-purple-300" : ""
+    }`;
+
   /* ---------------- APPLY ---------------- */
   const submitApply = async () => {
     if (!applyLeaveType) return alert("Leave Type required.");
     if (!applyFrom) return alert("From date required.");
     if (!applyReason.trim()) return alert("Reason required.");
 
-    // ✅ Full day needs To, Half/Permission => To = From (auto)
     const uiTo = needsTime(applyMode) ? applyFrom : applyTo;
     if (!uiTo) return alert("To date required.");
     if (!needsTime(applyMode) && new Date(uiTo) < new Date(applyFrom))
@@ -340,7 +438,9 @@ export default function LeaveManagement() {
     }
 
     if (managers.length === 0) {
-      return alert("Managers list empty. Add managers in hrmss_approvers table (role=manager).");
+      return alert(
+        "Managers list empty. Add managers in hrmss_approvers table (role=manager)."
+      );
     }
 
     const approverMgr = managers.find((m) => m.access === "approver");
@@ -373,7 +473,6 @@ export default function LeaveManagement() {
       status: "Pending",
     };
 
-    // ✅ send to BOTH (approver + viewer) -> 2 rows
     const rowsToInsert = [
       { ...common, request_to_id: approverMgr.id, request_to_name: approverMgr.name },
       ...viewerMgrs.map((v) => ({ ...common, request_to_id: v.id, request_to_name: v.name })),
@@ -403,7 +502,8 @@ export default function LeaveManagement() {
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900">Leave Management</h1>
           <p className="text-sm text-gray-600">
-            HR can view all leave requests and approve/reject them. HR can also apply leave to Managers.
+            HR can view all leave requests and approve/reject them. HR can also apply leave to
+            Managers.
           </p>
         </div>
 
@@ -416,24 +516,51 @@ export default function LeaveManagement() {
         </button>
       </div>
 
-      {/* Summary */}
+      {/* Summary (✅ clickable cards) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white border rounded-xl p-3">
+        <button
+          type="button"
+          onClick={() => onSummaryClick("All")}
+          className={summaryCardClass(statusFilter === "All")}
+          title="Show all requests"
+        >
           <div className="text-xs text-gray-500">Total</div>
           <div className="text-xl font-semibold">{counts.total}</div>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
+          {/* <div className="text-[11px] text-gray-500 mt-1">Click to view all</div> */}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSummaryClick("Pending")}
+          className={summaryCardClass(statusFilter === "Pending")}
+          title="Show pending requests"
+        >
           <div className="text-xs text-gray-500">Pending</div>
           <div className="text-xl font-semibold">{counts.pending}</div>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
+          {/* <div className="text-[11px] text-gray-500 mt-1">Click to filter</div> */}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSummaryClick("Approved")}
+          className={summaryCardClass(statusFilter === "Approved")}
+          title="Show approved requests"
+        >
           <div className="text-xs text-gray-500">Approved</div>
           <div className="text-xl font-semibold">{counts.approved}</div>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
+          {/* <div className="text-[11px] text-gray-500 mt-1">Click to filter</div> */}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSummaryClick("Rejected")}
+          className={summaryCardClass(statusFilter === "Rejected")}
+          title="Show rejected requests"
+        >
           <div className="text-xs text-gray-500">Rejected</div>
           <div className="text-xl font-semibold">{counts.rejected}</div>
-        </div>
+          {/* <div className="text-[11px] text-gray-500 mt-1">Click to filter</div> */}
+        </button>
       </div>
 
       {/* Filters */}
@@ -476,10 +603,33 @@ export default function LeaveManagement() {
             className="w-full md:w-80 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
           />
         </div>
+
+        {/* ✅ optional: show what filter is active */}
+        <div className="mt-3 text-xs text-gray-600">
+          Showing:{" "}
+          <b className="text-gray-900">
+            {statusFilter === "All" ? "All statuses" : statusFilter}
+          </b>
+          {sourceFilter !== "All" ? (
+            <>
+              {" "}
+              • Source: <b className="text-gray-900">{sourceFilter}</b>
+            </>
+          ) : null}
+          {search.trim() ? (
+            <>
+              {" "}
+              • Search: <b className="text-gray-900">{search.trim()}</b>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
+      <div
+        id="leave-table"
+        className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto"
+      >
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-gray-600">
             <tr>
@@ -512,8 +662,8 @@ export default function LeaveManagement() {
                 const tf = shortTime(r.timeFrom);
                 const tt = shortTime(r.timeTo);
 
-                // ✅ If Half Day / Permission -> always show time row (with placeholder)
                 const showTimeForThis = needsTime(r.mode);
+                const halfLabel = halfDayLabel(r.mode, tf);
 
                 return (
                   <tr key={r.id} className="hover:bg-gray-50">
@@ -526,7 +676,7 @@ export default function LeaveManagement() {
 
                       <div className="text-xs text-gray-500 mt-2">
                         <span className="font-semibold text-gray-700">Request To:</span>{" "}
-                        <span className="font-semibold">Manager</span>{" "}
+                        <span className="font-semibold">{r.requestToRole || "manager"}</span>{" "}
                         <span className="text-gray-500">• {r.requestToName || "-"}</span>
                       </div>
                     </td>
@@ -547,6 +697,12 @@ export default function LeaveManagement() {
 
                     <td className="px-4 py-3">
                       <div className="font-semibold text-gray-800">{r.mode}</div>
+
+                      {/* ✅ Half Day -> First Half / Second Half */}
+                      {isHalfDay(r.mode) ? (
+                        <div className="text-xs text-gray-500 mt-1">{halfLabel}</div>
+                      ) : null}
+
                       {r.hours ? (
                         <div className="text-xs text-gray-500 mt-1">⏱ {r.hours}</div>
                       ) : null}
@@ -554,7 +710,7 @@ export default function LeaveManagement() {
 
                     <td className="px-4 py-3">
                       <div className="text-gray-700">
-                        {r.from} → {r.to}
+                        {fmtDMY(r.from)} → {fmtDMY(r.to)}
                       </div>
 
                       {showTimeForThis ? (
@@ -573,7 +729,8 @@ export default function LeaveManagement() {
                       <span className={pill(r.status)}>{r.status}</span>
                       {r.decidedAt && (
                         <div className="text-xs text-gray-500 mt-1">
-                          Decided: {r.decidedAt} {r.decidedBy ? `• By: ${r.decidedBy}` : ""}
+                          Decided: {fmtDMY(r.decidedAt)}{" "}
+                          {r.decidedBy ? `• By: ${r.decidedBy}` : ""}
                         </div>
                       )}
                     </td>
@@ -609,9 +766,13 @@ export default function LeaveManagement() {
             {/* Header */}
             <div className="shrink-0 bg-gradient-to-r from-purple-700 via-indigo-600 to-sky-500 text-white px-5 py-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Apply Leave</p>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">
+                  Apply Leave
+                </p>
                 <div className="mt-1 text-lg font-semibold">Request To: Manager</div>
-                <div className="text-xs text-white/80 mt-1">Will be sent to approver + viewer</div>
+                <div className="text-xs text-white/80 mt-1">
+                  Will be sent to approver + viewer
+                </div>
               </div>
 
               <button
@@ -633,7 +794,9 @@ export default function LeaveManagement() {
                   {managers.length ? managerLabel : "No managers found"}
                 </div>
                 {mgrError ? (
-                  <div className="text-xs text-rose-600 mt-2">Managers fetch error: {mgrError}</div>
+                  <div className="text-xs text-rose-600 mt-2">
+                    Managers fetch error: {mgrError}
+                  </div>
                 ) : null}
               </div>
 
@@ -658,12 +821,10 @@ export default function LeaveManagement() {
                     const next = e.target.value;
                     setApplyMode(next);
 
-                    // ✅ Full Day -> clear time, Half/Permission -> keep time section
                     if (!needsTime(next)) {
                       setApplyFromTime("");
                       setApplyToTime("");
                     } else {
-                      // ✅ Half/Permission -> To always equals From
                       if (applyFrom) setApplyTo(applyFrom);
                     }
                   }}
@@ -673,6 +834,16 @@ export default function LeaveManagement() {
                     <option key={m}>{m}</option>
                   ))}
                 </select>
+
+                {/* ✅ Half Day selected -> show which half based on timeFrom */}
+                {isHalfDay(applyMode) ? (
+                  <div className="text-[11px] text-slate-600 mt-1">
+                    Session:{" "}
+                    <b className="text-slate-900">
+                      {halfDayLabel(applyMode, applyFromTime) || "Select First/Second Half"}
+                    </b>
+                  </div>
+                ) : null}
               </div>
 
               {/* From & To calendar always */}
@@ -685,7 +856,7 @@ export default function LeaveManagement() {
                     onChange={(e) => {
                       const v = e.target.value;
                       setApplyFrom(v);
-                      if (needsTime(applyMode)) setApplyTo(v); // ✅ auto sync
+                      if (needsTime(applyMode)) setApplyTo(v);
                     }}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400"
                   />
@@ -697,7 +868,7 @@ export default function LeaveManagement() {
                     type="date"
                     value={applyTo}
                     onChange={(e) => setApplyTo(e.target.value)}
-                    disabled={needsTime(applyMode)} // ✅ still visible, but locked
+                    disabled={needsTime(applyMode)}
                     className={`w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-purple-100 focus:border-purple-400 ${
                       needsTime(applyMode) ? "bg-slate-100 cursor-not-allowed" : ""
                     }`}
@@ -714,13 +885,26 @@ export default function LeaveManagement() {
               {needsTime(applyMode) && (
                 <div className="space-y-2">
                   <TimePreset
+                    mode={applyMode}
                     onMorning={() => {
-                      setApplyFromTime("09:00");
-                      setApplyToTime("13:00");
+                      // ✅ First Half exact time you asked
+                      if (isHalfDay(applyMode)) {
+                        setApplyFromTime("09:00");
+                        setApplyToTime("13:30");
+                      } else {
+                        setApplyFromTime("09:00");
+                        setApplyToTime("13:00");
+                      }
                     }}
                     onAfternoon={() => {
-                      setApplyFromTime("13:00");
-                      setApplyToTime("17:00");
+                      // ✅ Second Half exact time you asked
+                      if (isHalfDay(applyMode)) {
+                        setApplyFromTime("14:00");
+                        setApplyToTime("17:30");
+                      } else {
+                        setApplyFromTime("13:00");
+                        setApplyToTime("17:00");
+                      }
                     }}
                   />
 
@@ -800,7 +984,9 @@ export default function LeaveManagement() {
           <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 overflow-hidden">
             <div className="bg-gradient-to-r from-purple-700 via-indigo-600 to-sky-500 text-white px-4 py-3 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">Leave request</p>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">
+                  Leave request
+                </p>
                 <div className="mt-1 flex items-center gap-2 flex-wrap">
                   <span className="text-lg font-semibold">#{String(viewing.id).slice(0, 8)}</span>
                   <span className={pillDark()}>{viewing.status}</span>
@@ -839,27 +1025,38 @@ export default function LeaveManagement() {
 
               <div className="rounded-xl bg-white border border-slate-100 p-3">
                 <p className="text-[11px] text-slate-500">Request To</p>
-                <p className="mt-1 font-semibold text-slate-900">Manager • {viewing.requestToName || "-"}</p>
+                <p className="mt-1 font-semibold text-slate-900">
+                  {viewing.requestToRole || "manager"} • {viewing.requestToName || "-"}
+                </p>
               </div>
 
               <div className="rounded-xl bg-white border border-slate-100 p-3">
                 <p className="text-[11px] text-slate-500">Leave</p>
                 <p className="mt-1 font-semibold text-slate-900">
                   {viewing.leaveType} • {viewing.mode}
+                  {isHalfDay(viewing.mode) ? (
+                    <span className="text-xs text-slate-600">
+                      {" "}
+                      • {halfDayLabel(viewing.mode, viewing.timeFrom)}
+                    </span>
+                  ) : null}
                 </p>
+
                 <p className="mt-2 text-slate-800">
-                  {viewing.from} → {viewing.to}{" "}
+                  {fmtDMY(viewing.from)} → {fmtDMY(viewing.to)}{" "}
                   <span className="text-xs text-slate-500 ml-2">
                     ({diffDaysInclusive(viewing.from, viewing.to)} day(s))
                   </span>
                 </p>
 
-                {/* ✅ Half Day/Permission -> always show time line */}
                 {needsTime(viewing.mode) ? (
                   <p className="text-xs text-slate-700 mt-1">
-                    Time: <span className="font-semibold">{shortTime(viewing.timeFrom) || "--:--"}</span> →{" "}
-                    <span className="font-semibold">{shortTime(viewing.timeTo) || "--:--"}</span>
-                    {viewing.hours ? <span className="text-slate-500"> • {viewing.hours}</span> : null}
+                    Time:{" "}
+                    <span className="font-semibold">{shortTime(viewing.timeFrom) || "--:--"}</span>{" "}
+                    → <span className="font-semibold">{shortTime(viewing.timeTo) || "--:--"}</span>
+                    {viewing.hours ? (
+                      <span className="text-slate-500"> • {viewing.hours}</span>
+                    ) : null}
                   </p>
                 ) : null}
               </div>
@@ -884,9 +1081,12 @@ export default function LeaveManagement() {
                 <div className="rounded-xl bg-white border border-slate-100 p-3">
                   <p className="text-[11px] text-slate-500">Decision</p>
                   <p className="mt-1 font-semibold text-slate-900">
-                    {viewing.status} • {viewing.decidedAt} {viewing.decidedBy ? `• ${viewing.decidedBy}` : ""}
+                    {viewing.status} • {fmtDMY(viewing.decidedAt)}{" "}
+                    {viewing.decidedBy ? `• ${viewing.decidedBy}` : ""}
                   </p>
-                  <p className="mt-1 text-sm text-slate-700">Note: {viewing.decisionNote || "-"}</p>
+                  <p className="mt-1 text-sm text-slate-700">
+                    Note: {viewing.decisionNote || "-"}
+                  </p>
                 </div>
               )}
             </div>

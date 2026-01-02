@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { getManagerSession } from "./managerData";
 
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
+
 const navItems = [
   { to: "/manager-dashboard", end: true, label: "Dashboard", icon: Home },
   { to: "/manager-dashboard/approvals", label: "Leave Approvals", icon: CheckSquare },
@@ -60,6 +62,13 @@ export default function ManagerLayout() {
   }, [location.pathname]);
 
   const approver = session.role === "approver";
+  const handleLogout = () => {
+    try {
+      sessionStorage.removeItem(DOCS_AUTH_KEY);
+    } catch {}
+    localStorage.removeItem(DOCS_AUTH_KEY);
+    navigate("/login");
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -105,7 +114,7 @@ export default function ManagerLayout() {
 
           <div className="p-4 border-t border-white/10">
             <button
-              onClick={() => navigate("/login")}
+              onClick={handleLogout}
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/10 text-white text-sm font-semibold hover:bg-white/20 transition"
             >
               <LogOut size={16} /> Logout

@@ -27,13 +27,13 @@ const ALLOWED_SOURCES = [
 ];
 
 const SOURCE_ROUTE = {
-  Employees: "/admin/employees",
-  Attendance: "/admin/attendance",
-  LeaveManagement: "/admin/leave",
-  Payroll: "/admin/payroll",
-  Documents: "/admin/documents",
-  "My Profile": "/admin/profile",
-  Birthday: "/admin/birthday",
+  Employees: "/dashboard/employees",
+  Attendance: "/dashboard/attendance",
+  LeaveManagement: "/dashboard/leave",
+  Payroll: "/dashboard/payroll",
+  Documents: "/dashboard/documents",
+  "My Profile": "/dashboard/profile",
+  Birthday: "/dashboard/people",
 };
 
 const tone = {
@@ -384,7 +384,7 @@ export default function AdminNotifications() {
   };
 
   const goToSource = (n) => {
-    const route = n.route || SOURCE_ROUTE[n.source] || "/admin";
+    const route = n.route || SOURCE_ROUTE[n.source] || "/dashboard";
     navigate(route, { state: { fromNotification: n, notifId: n.id } });
   };
 

@@ -165,11 +165,32 @@ const roleBadge = (role) => {
   return `${base} bg-slate-50 text-slate-700 border-slate-200`;
 };
 
+// ✅ Date format: DD-MM-YYYY (display only)
+const pad2 = (n) => String(n).padStart(2, "0");
+const fmtDMY = (v) => {
+  if (!v) return "-";
+  const s = String(v);
+
+  // if "YYYY-MM-DD" (avoid timezone issues)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [yy, mm, dd] = s.split("-");
+    return `${dd}-${mm}-${yy}`;
+  }
+
+  // if ISO datetime
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return s;
+
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+};
+
 const fmtDT = (iso) => {
   if (!iso) return { date: "-", time: "-" };
   const d = new Date(iso);
-  const date = d.toLocaleDateString();
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const date = Number.isFinite(d.getTime()) ? fmtDMY(d.toISOString()) : "-";
+  const time = Number.isFinite(d.getTime())
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "-";
   return { date, time };
 };
 
@@ -215,6 +236,9 @@ const mapEmployeeDbToUi = (r) => ({
   appliedAt: r.applied_at,
   decisionNote: "",
   decidedAt: "",
+  // ✅ optional (if you add in employee table later)
+  requestedTo: r.requested_to || r.request_to || r.requestedTo || [],
+  halfSession: r.half_session || r.halfSession || "",
 });
 
 const mapAdminDbToUi = (r) => ({
@@ -234,6 +258,10 @@ const mapAdminDbToUi = (r) => ({
   appliedAt: r.applied_at,
   decisionNote: "",
   decidedAt: "",
+  // ✅ NEW: who this request is sent to (HR/Manager)
+  requestedTo: r.requested_to || r.request_to || r.requestedTo || [],
+  // ✅ NEW: half session (First/Second)
+  halfSession: r.half_session || r.halfSession || "",
 });
 
 const showTimeLine = (r) => {
@@ -275,6 +303,13 @@ const LeaveManagement = () => {
   const [hours, setHours] = useState("");
   const [reason, setReason] = useState("");
 
+  // ✅ NEW: Request To (HR/Manager) multiple select
+  const APPROVER_OPTIONS = ["HR", "Manager"];
+  const [requestedTo, setRequestedTo] = useState(["HR", "Manager"]);
+
+  // ✅ NEW: Half Day session (First/Second)
+  const [halfSession, setHalfSession] = useState("First Half");
+
   // Filters (both)
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
@@ -295,6 +330,9 @@ const LeaveManagement = () => {
     setTimeTo("");
     setHours("");
     setReason("");
+    // ✅ default both selected
+    setRequestedTo(["HR", "Manager"]);
+    setHalfSession("First Half");
   };
 
   // close apply fields when switching mode
@@ -315,7 +353,10 @@ const LeaveManagement = () => {
     }
     if (leaveMode === "Half Day") {
       setTo("");
-      // time stays (needed)
+      // ✅ show First/Second half options and auto time
+      setHalfSession("First Half");
+      setTimeFrom("09:00");
+      setTimeTo("13:30");
     }
     if (leaveMode === "Permission") {
       setTo("");
@@ -323,6 +364,19 @@ const LeaveManagement = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaveMode]);
+
+  // ✅ auto set time for Half Day based on session
+  useEffect(() => {
+    if (leaveMode !== "Half Day") return;
+    if (halfSession === "First Half") {
+      setTimeFrom("09:00");
+      setTimeTo("13:30");
+      return;
+    }
+    setTimeFrom("14:00");
+    setTimeTo("17:30");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [halfSession, leaveMode]);
 
   // auto compute hours when time changes (Permission + Half Day)
   useEffect(() => {
@@ -452,9 +506,25 @@ const LeaveManagement = () => {
     setSummaryOpen(true);
   };
 
+  // ✅ NEW: toggle approvers (max 2)
+  const toggleRequestedTo = (role) => {
+    setRequestedTo((prev) => {
+      const has = prev.includes(role);
+      if (has) return prev.filter((x) => x !== role);
+      if (prev.length >= 2) return prev; // max 2
+      return [...prev, role];
+    });
+  };
+
   /* ---------------- APPLY (ADMIN ONLY) -> SUPABASE INSERT ---------------- */
   const submitLeave = async () => {
     if (mode !== "admin") return;
+
+    // ✅ validate requestedTo
+    if (!requestedTo || requestedTo.length === 0) {
+      alert("Please choose Request To (HR / Manager).");
+      return;
+    }
 
     if (!reason.trim()) {
       alert("Please fill Reason.");
@@ -506,6 +576,10 @@ const LeaveManagement = () => {
           : null,
       reason: reason.trim(),
       status: "Pending",
+
+      // ✅ NEW fields (make sure these columns exist in admin_leaves)
+      requested_to: requestedTo, // Postgres: text[] (recommended) or jsonb
+      half_session: leaveMode === "Half Day" ? halfSession : null,
     };
 
     const { error } = await supabase.from(ADM_TABLE).insert(payload);
@@ -619,6 +693,37 @@ const LeaveManagement = () => {
             {/* body (scroll if height small) */}
             <div className="px-5 py-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-1 gap-3">
+                {/* ✅ NEW: Request To (HR/Manager) */}
+                <div className="border border-gray-200 rounded-xl p-3">
+                  <div className="text-xs text-gray-500 mb-2">Request To</div>
+                  <div className="flex flex-wrap gap-2">
+                    {APPROVER_OPTIONS.map((opt) => {
+                      const active = requestedTo.includes(opt);
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => toggleRequestedTo(opt)}
+                          className={`px-3 py-2 rounded-xl text-sm border transition ${
+                            active
+                              ? "bg-blue-600 text-white border-blue-600"
+                              : "bg-white hover:bg-gray-50 border-gray-200 text-gray-800"
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-2">
+                    Selected:{" "}
+                    <span className="font-semibold">
+                      {requestedTo.length ? requestedTo.join(", ") : "None"}
+                    </span>{" "}
+                    (max 2)
+                  </div>
+                </div>
+
                 {/* Leave Type */}
                 <select
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -670,7 +775,7 @@ const LeaveManagement = () => {
                   </div>
                 )}
 
-                {/* Half Day date + time (✅ time show for half day) */}
+                {/* ✅ Half Day: Date + First/Second Half (with fixed time) */}
                 {leaveMode === "Half Day" && (
                   <>
                     <div>
@@ -685,6 +790,52 @@ const LeaveManagement = () => {
                       />
                     </div>
 
+                    {/* ✅ NEW: first half / second half */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setHalfSession("First Half")}
+                        className={`text-left border rounded-xl p-3 transition ${
+                          halfSession === "First Half"
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white hover:bg-gray-50 border-gray-200"
+                        }`}
+                      >
+                        <div className="text-sm font-semibold">First Half</div>
+                        <div
+                          className={`text-xs mt-1 ${
+                            halfSession === "First Half"
+                              ? "text-white/80"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          09:00 → 13:30
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setHalfSession("Second Half")}
+                        className={`text-left border rounded-xl p-3 transition ${
+                          halfSession === "Second Half"
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white hover:bg-gray-50 border-gray-200"
+                        }`}
+                      >
+                        <div className="text-sm font-semibold">Second Half</div>
+                        <div
+                          className={`text-xs mt-1 ${
+                            halfSession === "Second Half"
+                              ? "text-white/80"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          14:00 → 17:30
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* show fixed time (readonly) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">
@@ -692,7 +843,8 @@ const LeaveManagement = () => {
                         </label>
                         <input
                           type="time"
-                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
+                          readOnly
+                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none bg-gray-50"
                           value={timeFrom}
                           onChange={(e) => setTimeFrom(e.target.value)}
                         />
@@ -703,25 +855,13 @@ const LeaveManagement = () => {
                         </label>
                         <input
                           type="time"
-                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
+                          readOnly
+                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none bg-gray-50"
                           value={timeTo}
                           onChange={(e) => setTimeTo(e.target.value)}
                         />
                       </div>
                     </div>
-
-                    {/* <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Hours (optional)
-                      </label>
-                      <input
-                        type="text"
-                        className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
-                        value={hours}
-                        onChange={(e) => setHours(e.target.value)}
-                        placeholder="Eg: 4 hr / 3 hr 30 min"
-                      />
-                    </div> */}
                   </>
                 )}
 
@@ -914,8 +1054,25 @@ const LeaveManagement = () => {
                           <div className="text-xs text-gray-500 mt-0.5">
                             Mode:{" "}
                             <span className="font-semibold">{r.leaveMode}</span>
+                            {r.leaveMode === "Half Day" && r.halfSession ? (
+                              <>
+                                {" "}
+                                • <span className="font-semibold">{r.halfSession}</span>
+                              </>
+                            ) : null}
                             {showTimeLine(r)}
                           </div>
+
+                          {/* ✅ show requested to */}
+                          {Array.isArray(r.requestedTo) && r.requestedTo.length > 0 && (
+                            <div className="text-xs text-gray-500">
+                              Request To:{" "}
+                              <span className="font-semibold">
+                                {r.requestedTo.join(", ")}
+                              </span>
+                            </div>
+                          )}
+
                           <div className="text-xs text-gray-500">
                             #{String(r.id).slice(0, 8)} • Applied: {date} {time}
                           </div>
@@ -928,7 +1085,7 @@ const LeaveManagement = () => {
 
                     <td className="px-4 py-3">
                       <div className="text-gray-700">
-                        {r.from} → {r.to}
+                        {fmtDMY(r.from)} → {fmtDMY(r.to)}
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
                         {r.ownerName} • {r.ownerId}
@@ -983,7 +1140,8 @@ const LeaveManagement = () => {
                     : `${summaryStatus} Leave Letters`}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Showing: <span className="font-semibold">{summaryList.length}</span>{" "}
+                  Showing:{" "}
+                  <span className="font-semibold">{summaryList.length}</span>{" "}
                   requests • Mode:{" "}
                   <span className="font-semibold">{mode.toUpperCase()}</span>
                 </div>
@@ -1053,8 +1211,26 @@ const LeaveManagement = () => {
                               <div className="text-xs text-gray-500">
                                 Mode:{" "}
                                 <span className="font-semibold">{r.leaveMode}</span>
+                                {r.leaveMode === "Half Day" && r.halfSession ? (
+                                  <>
+                                    {" "}
+                                    •{" "}
+                                    <span className="font-semibold">{r.halfSession}</span>
+                                  </>
+                                ) : null}
                                 {showTimeLine(r)}
                               </div>
+
+                              {/* ✅ show request to */}
+                              {Array.isArray(r.requestedTo) && r.requestedTo.length > 0 && (
+                                <div className="text-xs text-gray-500">
+                                  Request To:{" "}
+                                  <span className="font-semibold">
+                                    {r.requestedTo.join(", ")}
+                                  </span>
+                                </div>
+                              )}
+
                               <div className="text-xs text-gray-500">
                                 #{String(r.id).slice(0, 8)} • Applied: {date} {time}
                               </div>
@@ -1065,7 +1241,7 @@ const LeaveManagement = () => {
 
                             <td className="px-4 py-3">
                               <div className="text-gray-700">
-                                {r.from} → {r.to}
+                                {fmtDMY(r.from)} → {fmtDMY(r.to)}
                               </div>
                               <div className="text-xs text-gray-500 mt-1">
                                 Days: <span className="font-semibold">{days}</span>
@@ -1131,8 +1307,24 @@ const LeaveManagement = () => {
                 </div>
                 <p className="text-xs text-white/80 mt-1">
                   {viewing.leaveType} • {viewing.leaveMode}
+                  {viewing.leaveMode === "Half Day" && viewing.halfSession ? (
+                    <>
+                      {" "}
+                      • <span className="font-semibold">{viewing.halfSession}</span>
+                    </>
+                  ) : null}
                   {showTimeLine(viewing)}
                 </p>
+
+                {/* ✅ show request to */}
+                {Array.isArray(viewing.requestedTo) && viewing.requestedTo.length > 0 && (
+                  <p className="text-xs text-white/80 mt-1">
+                    Request To:{" "}
+                    <span className="font-semibold">
+                      {viewing.requestedTo.join(", ")}
+                    </span>
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -1157,11 +1349,11 @@ const LeaveManagement = () => {
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                   <p className="text-[11px] text-slate-500">From</p>
-                  <p className="font-semibold text-slate-900">{viewing.from}</p>
+                  <p className="font-semibold text-slate-900">{fmtDMY(viewing.from)}</p>
                 </div>
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                   <p className="text-[11px] text-slate-500">To</p>
-                  <p className="font-semibold text-slate-900">{viewing.to}</p>
+                  <p className="font-semibold text-slate-900">{fmtDMY(viewing.to)}</p>
                 </div>
               </div>
 

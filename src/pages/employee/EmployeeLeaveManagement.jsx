@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Pencil, Plus, X } from "lucide-react";
+import { Eye, Pencil, Plus, X, Check } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 
 /* ---------------- CONSTANTS ---------------- */
 const LEAVES_TABLE = "hrmss_leave_requests";
+const APPROVER_TABLE = "hrmss_approvers";
 
+/**
+ * ✅ If you want to force-hide specific approver IDs from "Request To",
+ * add their ids here. Example: new Set(["APP-002"])
+ */
+const EXCLUDE_APPROVER_IDS = new Set([]);
+
+/* ---------------- LISTS ---------------- */
 const leaveTypes = [
   "Casual Leave",
   "Sick Leave",
@@ -15,19 +23,19 @@ const leaveTypes = [
 
 const leaveModes = ["Full Day", "Half Day", "Permission"];
 
+/* ---------------- UI helpers ---------------- */
 const tone = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",
   Approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
   Rejected: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
-const fmt = (iso) => {
-  if (!iso) return "-";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return String(iso);
-  }
+const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
+
+const shortTime = (t) => {
+  if (!t) return "";
+  const s = String(t);
+  return s.length >= 5 ? s.slice(0, 5) : s;
 };
 
 const calcDuration = (from, to) => {
@@ -43,15 +51,42 @@ const calcDuration = (from, to) => {
   }`;
 };
 
-const needsTime = (mode) => mode === "Permission" || mode === "Half Day";
-
-const shortTime = (t) => {
-  if (!t) return "";
-  const s = String(t);
-  return s.length >= 5 ? s.slice(0, 5) : s;
+/* ✅ DD-MM-YYYY format for display */
+const toDMY = (v) => {
+  if (!v) return "-";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) {
+    const [y, m, d] = String(v).split("-");
+    return `${d}-${m}-${y}`;
+  }
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yy = String(d.getFullYear());
+    return `${dd}-${mm}-${yy}`;
+  } catch {
+    return String(v);
+  }
 };
 
-/* ---------------- ✅ CURRENT EMPLOYEE FROM STORAGE (FIX) ---------------- */
+const fmtDateTimeDMY = (iso) => {
+  if (!iso) return "-";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yy = String(d.getFullYear());
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${dd}-${mm}-${yy} ${hh}:${mi}`;
+  } catch {
+    return String(iso);
+  }
+};
+
+/* ---------------- ✅ CURRENT EMPLOYEE FROM STORAGE ---------------- */
 const safeJson = (v) => {
   try {
     return JSON.parse(v);
@@ -90,7 +125,6 @@ const normalizeUser = (obj, fallback) => {
 const getEmployeeFromStorage = (fallback) => {
   if (typeof window === "undefined") return fallback;
 
-  // ✅ include your known keys + your previous cache key pattern
   const likelyKeys = [
     "hrmss.session",
     "hrmss.auth",
@@ -100,7 +134,7 @@ const getEmployeeFromStorage = (fallback) => {
     "employee_session",
     "employeeSession",
     "EMPLOYEE_SESSION",
-    "HRMSS_AUTH_SESSION", // (if you stored like this)
+    "HRMSS_AUTH_SESSION",
   ];
 
   const matchesEmployeeRole = (o) => {
@@ -113,7 +147,6 @@ const getEmployeeFromStorage = (fallback) => {
     return null;
   };
 
-  // 1) try known keys
   for (const k of likelyKeys) {
     const raw = window.localStorage.getItem(k);
     if (!raw) continue;
@@ -125,21 +158,17 @@ const getEmployeeFromStorage = (fallback) => {
       if (matchesEmployeeRole(c) === true) return normalizeUser(c, fallback);
     }
 
-    // if role not present, still try by ID prefix
     if (parsed && typeof parsed === "object") {
       const u = normalizeUser(parsed?.user || parsed, fallback);
       if ((u.id || "").toUpperCase().startsWith("EMP")) return u;
     }
   }
 
-  // 2) scan all localStorage (best effort)
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
       if (!key) continue;
 
-      // ✅ also detect your cache pattern if present
-      // hrmss.profile.cache.employee.<employee_id>
       if (key.startsWith("hrmss.profile.cache.employee.")) {
         const raw = window.localStorage.getItem(key);
         const parsed = safeJson(raw);
@@ -169,10 +198,7 @@ const getEmployeeFromStorage = (fallback) => {
   return fallback;
 };
 
-/* ---------------- APPROVER TABLE (Request To) ---------------- */
-const APPROVER_TABLE = "hrmss_approvers";
-
-/* ---------------- MODAL ---------------- */
+/* ---------------- MODALS ---------------- */
 const ModalShell = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
     <div className="w-full max-w-xl bg-white rounded-2xl shadow-xl">
@@ -187,24 +213,157 @@ const ModalShell = ({ title, onClose, children }) => (
   </div>
 );
 
+/* ✅ Apply modal (screenshot size + scroll + new color) */
+const ApplyModal = ({ open, onClose, children }) => {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl ring-1 ring-slate-200 overflow-hidden flex flex-col">
+        <div className="shrink-0 bg-gradient-to-r from-fuchsia-700 via-indigo-700 to-sky-600 text-white px-5 py-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {/* <p className="text-[11px] uppercase tracking-[0.2em] text-white/80">
+              Apply Leave
+            </p> */}
+            <div className="mt-1 text-lg font-semibold">Apply Leave</div>
+            {/* <div className="text-xs text-white/80 mt-1">
+              Will be sent to approver + viewer
+            </div> */}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-white/20 bg-white/10 p-2 hover:bg-white/15"
+            aria-label="Close"
+          >
+            <X size={18} className="text-white" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+};
+
 const TimePreset = ({ onMorning, onAfternoon }) => (
-  <div className="flex gap-2">
+  <div className="flex gap-2 flex-wrap">
     <button
       type="button"
       onClick={onMorning}
-      className="px-3 py-1 text-xs border rounded"
+      className="px-3 py-1 text-xs border rounded-lg hover:bg-slate-50"
     >
       Morning (09:00 - 13:00)
     </button>
     <button
       type="button"
       onClick={onAfternoon}
-      className="px-3 py-1 text-xs border rounded"
+      className="px-3 py-1 text-xs border rounded-lg hover:bg-slate-50"
     >
       Afternoon (13:00 - 17:00)
     </button>
   </div>
 );
+
+/* ---------------- MULTI SELECT (checkbox list) ---------------- */
+const MultiApproverSelect = ({
+  items,
+  valueIds,
+  setValueIds,
+  errorText,
+}) => {
+  const toggle = (id) => {
+    setValueIds((prev) => {
+      const has = prev.includes(id);
+      if (has) return prev.filter((x) => x !== id);
+      return [...prev, id];
+    });
+  };
+
+  const selectedNames = useMemo(() => {
+    const map = new Map(items.map((x) => [x.id, x]));
+    return valueIds
+      .map((id) => map.get(id))
+      .filter(Boolean)
+      .map((x) => x.name);
+  }, [items, valueIds]);
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-xl border border-slate-200 p-3 bg-slate-50">
+        <div className="text-xs text-slate-500">Request To</div>
+        <div className="font-semibold text-slate-900">
+          {selectedNames.length ? selectedNames.join(", ") : "No one selected"}
+        </div>
+        <div className="text-[11px] text-slate-600 mt-1">
+          {selectedNames.length
+            ? `${selectedNames.length} selected`
+            : "Select at least 1 approver"}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-3 py-2 bg-white border-b text-xs font-semibold text-slate-700">
+         Approvers (Manager / Admin / HR)
+        </div>
+
+        <div className="max-h-44 overflow-y-auto bg-white">
+          {items.length === 0 ? (
+            <div className="p-3 text-xs text-rose-600">
+              Approver list empty.
+              {errorText ? (
+                <div className="mt-1">Error: {errorText}</div>
+              ) : (
+                <div className="mt-1">
+                  Check <b>hrmss_approvers</b> table + RLS SELECT policy.
+                </div>
+              )}
+            </div>
+          ) : (
+            items.map((a) => {
+              const checked = valueIds.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => toggle(a.id)}
+                  className="w-full text-left px-3 py-2 flex items-center justify-between hover:bg-slate-50"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 truncate">
+                      {a.name}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {a.id}
+                      {a.role ? ` • ${a.role}` : ""}
+                      {a.access ? ` • ${a.access}` : ""}
+                    </div>
+                  </div>
+
+                  <span
+                    className={`shrink-0 w-6 h-6 rounded-lg border flex items-center justify-center ${
+                      checked
+                        ? "bg-slate-900 border-slate-900 text-white"
+                        : "bg-white border-slate-200 text-transparent"
+                    }`}
+                  >
+                    <Check size={14} />
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 /* ---------------- MAIN ---------------- */
 export default function EmployeeLeaveManagement() {
@@ -230,7 +389,7 @@ export default function EmployeeLeaveManagement() {
   const [approverError, setApproverError] = useState("");
 
   /* CREATE */
-  const [cRequestToId, setCRequestToId] = useState("");
+  const [cRequestToIds, setCRequestToIds] = useState([]); // ✅ multi
   const [cType, setCType] = useState("Casual Leave");
   const [cMode, setCMode] = useState("Full Day");
   const [cFrom, setCFrom] = useState("");
@@ -239,7 +398,7 @@ export default function EmployeeLeaveManagement() {
   const [cToTime, setCToTime] = useState("");
   const [cReason, setCReason] = useState("");
 
-  /* EDIT */
+  /* EDIT (single, same as your logic) */
   const [eRequestToId, setERequestToId] = useState("");
   const [eType, setEType] = useState("");
   const [eMode, setEMode] = useState("");
@@ -252,7 +411,7 @@ export default function EmployeeLeaveManagement() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
 
-  /* ---------------- FETCH APPROVERS ---------------- */
+  /* ---------------- FETCH APPROVERS (✅ Manager + Admin + HR) ---------------- */
   const fetchApprovers = async () => {
     setApproverError("");
 
@@ -261,6 +420,8 @@ export default function EmployeeLeaveManagement() {
       .select("id,name,role,access,active")
       .eq("active", true)
       .eq("access", "approver")
+      .in("role", ["hr", "manager", "admin"]) // ✅ now all 3 roles
+      .order("role", { ascending: true })
       .order("name", { ascending: true });
 
     if (error) {
@@ -270,13 +431,23 @@ export default function EmployeeLeaveManagement() {
       return;
     }
 
+    // ✅ dedupe by (role + name) so same HR duplicates removed
+    const seen = new Set();
     const list = (data || [])
       .map((r) => ({
         id: String(r.id),
-        name: String(r.name),
+        name: String(r.name || ""),
         role: String(r.role || ""),
+        access: String(r.access || ""),
       }))
-      .filter((x) => x.id && x.name);
+      .filter((x) => x.id && x.name)
+      .filter((x) => !EXCLUDE_APPROVER_IDS.has(x.id))
+      .filter((x) => {
+        const key = `${x.role}:${x.name.trim().toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
     setApprovers(list);
   };
@@ -289,7 +460,7 @@ export default function EmployeeLeaveManagement() {
       .from(LEAVES_TABLE)
       .select("*")
       .eq("owner_role", "employee")
-      .eq("owner_id", EMP.id) // ✅ THIS is the key filter (now EMP is dynamic)
+      .eq("owner_id", EMP.id)
       .order("applied_at", { ascending: false });
 
     if (error) {
@@ -312,7 +483,6 @@ export default function EmployeeLeaveManagement() {
         status: r.status,
         appliedAt: r.applied_at,
 
-        // request-to / approver
         requestToId: r.request_to_id,
         requestToName: r.request_to_name,
         requestToRole: r.request_to_role,
@@ -329,6 +499,14 @@ export default function EmployeeLeaveManagement() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [EMP.id]);
+
+  useEffect(() => {
+    if (needsTime(cMode) && cFrom) setCTo(cFrom);
+  }, [cMode, cFrom]);
+
+  useEffect(() => {
+    if (needsTime(eMode) && eFrom) setETo(eFrom);
+  }, [eMode, eFrom]);
 
   /* ---------------- STATS ---------------- */
   const stats = useMemo(
@@ -350,7 +528,8 @@ export default function EmployeeLeaveManagement() {
         (r) =>
           (r.leaveType || "").toLowerCase().includes(q) ||
           (r.mode || "").toLowerCase().includes(q) ||
-          (r.requestToName || "").toLowerCase().includes(q)
+          (r.requestToName || "").toLowerCase().includes(q) ||
+          (r.requestToRole || "").toLowerCase().includes(q)
       );
     }
     return list;
@@ -359,64 +538,80 @@ export default function EmployeeLeaveManagement() {
   const selectedView = rows.find((r) => r.id === viewId);
   const selectedEdit = rows.find((r) => r.id === editId);
 
-  const selectedCreateApprover = useMemo(
-    () => approvers.find((a) => a.id === cRequestToId),
-    [approvers, cRequestToId]
-  );
-  const selectedEditApprover = useMemo(
-    () => approvers.find((a) => a.id === eRequestToId),
-    [approvers, eRequestToId]
-  );
+  const approverById = useMemo(() => {
+    const m = new Map();
+    for (const a of approvers) m.set(a.id, a);
+    return m;
+  }, [approvers]);
 
-  /* ---------------- CREATE ---------------- */
+  /* ---------------- CREATE (multi insert) ---------------- */
   const createLeave = async (e) => {
     e.preventDefault();
 
-    if (!cRequestToId) {
-      alert("Please select Request To (approver).");
+    if (!cRequestToIds.length) {
+      alert("Please select at least 1 Request To (approver).");
       return;
     }
 
-    const payload = {
+    const toDateForDB = cMode === "Full Day" ? cTo : cFrom;
+    if (!cFrom) return alert("From date required.");
+    if (!toDateForDB) return alert("To date required.");
+    if (!cReason.trim()) return alert("Reason required.");
+
+    if (needsTime(cMode)) {
+      if (!cFromTime || !cToTime) return alert("Time From/To required.");
+      const dur = calcDuration(cFromTime, cToTime);
+      if (!dur) return alert("Invalid time range.");
+    }
+
+    const common = {
       owner_role: "employee",
-      owner_id: EMP.id,       // ✅ dynamic
-      owner_name: EMP.name,   // ✅ dynamic
+      owner_id: EMP.id,
+      owner_name: EMP.name,
 
       leave_type: cType,
       mode: cMode,
       from_date: cFrom,
-      to_date: cMode === "Full Day" ? cTo : cFrom,
+      to_date: toDateForDB,
 
       time_from: needsTime(cMode) ? cFromTime : null,
       time_to: needsTime(cMode) ? cToTime : null,
       hours: needsTime(cMode) ? calcDuration(cFromTime, cToTime) : null,
 
-      reason: cReason,
+      reason: cReason.trim(),
       status: "Pending",
-
-      // ✅ request-to saved in DB
-      request_to_id: selectedCreateApprover?.id ?? cRequestToId,
-      request_to_name: selectedCreateApprover?.name ?? null,
-      request_to_role: selectedCreateApprover?.role ?? null,
     };
 
-    const { error } = await supabase.from(LEAVES_TABLE).insert(payload);
+    // ✅ insert 1 row per selected approver
+    const rowsToInsert = cRequestToIds.map((id) => {
+      const a = approverById.get(id);
+      return {
+        ...common,
+        request_to_id: a?.id ?? id,
+        request_to_name: a?.name ?? null,
+        request_to_role: a?.role ?? null, // ✅ saves manager/admin/hr
+      };
+    });
+
+    const { error } = await supabase.from(LEAVES_TABLE).insert(rowsToInsert);
     if (error) return alert(error.message);
 
     setCreateOpen(false);
-    setCRequestToId("");
+    setCRequestToIds([]);
+    setCType("Casual Leave");
+    setCMode("Full Day");
     setCFrom("");
     setCTo("");
     setCFromTime("");
     setCToTime("");
     setCReason("");
+
     fetchLeaves();
   };
 
-  /* ---------------- EDIT ---------------- */
+  /* ---------------- EDIT (single) ---------------- */
   const openEdit = (r) => {
     setEditId(r.id);
-
     setERequestToId(r.requestToId ? String(r.requestToId) : "");
     setEType(r.leaveType);
     setEMode(r.mode);
@@ -435,6 +630,8 @@ export default function EmployeeLeaveManagement() {
       return;
     }
 
+    const a = approverById.get(eRequestToId);
+
     const updatePayload = {
       leave_type: eType,
       mode: eMode,
@@ -447,10 +644,9 @@ export default function EmployeeLeaveManagement() {
 
       reason: eReason,
 
-      // ✅ allow change approver while Pending
-      request_to_id: selectedEditApprover?.id ?? eRequestToId,
-      request_to_name: selectedEditApprover?.name ?? null,
-      request_to_role: selectedEditApprover?.role ?? null,
+      request_to_id: a?.id ?? eRequestToId,
+      request_to_name: a?.name ?? null,
+      request_to_role: a?.role ?? null,
     };
 
     const { error } = await supabase
@@ -544,17 +740,27 @@ export default function EmployeeLeaveManagement() {
                     <div className="text-xs text-slate-500">
                       {r.mode} {r.hours ? `• ${r.hours}` : ""}
                     </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      Applied: {fmtDateTimeDMY(r.appliedAt)}
+                    </div>
                   </td>
 
                   <td className="px-4 py-3">
-                    {r.from} {r.to && `→ ${r.to}`}
+                    <div className="font-semibold text-slate-800">
+                      {toDMY(r.from)} {r.to ? `→ ${toDMY(r.to)}` : ""}
+                    </div>
+                    {needsTime(r.mode) && r.timeFrom && r.timeTo ? (
+                      <div className="text-xs text-slate-500 mt-1">
+                        Time: {r.timeFrom} → {r.timeTo}
+                      </div>
+                    ) : null}
                   </td>
 
                   <td className="px-4 py-3">
-                    <div className="text-xs text-slate-600">
+                    <div className="text-xs text-slate-700 font-semibold">
                       {r.requestToName || "-"}
                       {r.requestToRole ? (
-                        <span className="ml-2 px-2 py-0.5 border rounded-full">
+                        <span className="ml-2 px-2 py-0.5 border rounded-full text-[11px] font-semibold">
                           {r.requestToRole}
                         </span>
                       ) : null}
@@ -614,8 +820,8 @@ export default function EmployeeLeaveManagement() {
             <div className="p-3 border rounded-lg">
               <p className="text-xs text-slate-500">Request To</p>
               <p className="font-semibold">{selectedView.requestToName || "-"}</p>
-              {selectedView.requestToId ? (
-                <p className="text-xs text-slate-500 mt-1">{selectedView.requestToId}</p>
+              {selectedView.requestToRole ? (
+                <p className="text-xs text-slate-500 mt-1">Role: {selectedView.requestToRole}</p>
               ) : null}
             </div>
 
@@ -633,8 +839,8 @@ export default function EmployeeLeaveManagement() {
               <div className="p-3 border rounded-lg">
                 <p className="text-xs text-slate-500">Duration</p>
                 <p className="font-semibold">
-                  {selectedView.from}
-                  {selectedView.mode === "Full Day" ? ` → ${selectedView.to}` : ""}
+                  {toDMY(selectedView.from)}
+                  {selectedView.mode === "Full Day" ? ` → ${toDMY(selectedView.to)}` : ""}
                 </p>
 
                 {needsTime(selectedView.mode) &&
@@ -653,162 +859,184 @@ export default function EmployeeLeaveManagement() {
               <p>{selectedView.reason || "-"}</p>
             </div>
 
-            <p className="text-xs text-slate-400">Applied at {fmt(selectedView.appliedAt)}</p>
+            <p className="text-xs text-slate-400">
+              Applied at {fmtDateTimeDMY(selectedView.appliedAt)}
+            </p>
           </div>
         </ModalShell>
       )}
 
       {/* CREATE MODAL */}
-      {createOpen && (
-        <ModalShell title="Apply Leave" onClose={() => setCreateOpen(false)}>
-          <form onSubmit={createLeave} className="space-y-3">
-            {/* Request To */}
-            <div>
-              <label className="block text-xs text-slate-600 mb-1">Request To</label>
-              <select
-                value={cRequestToId}
-                onChange={(e) => setCRequestToId(e.target.value)}
-                required
-                className="w-full border rounded-lg px-3 py-2"
-              >
-                <option value="">Select Approver</option>
-                {approvers.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} {a.role ? `(${a.role})` : ""}
-                  </option>
-                ))}
-              </select>
+      <ApplyModal open={createOpen} onClose={() => setCreateOpen(false)}>
+        <form onSubmit={createLeave} className="space-y-4 text-sm">
+          <MultiApproverSelect
+            items={approvers}
+            valueIds={cRequestToIds}
+            setValueIds={setCRequestToIds}
+            errorText={approverError}
+          />
 
-              {approvers.length === 0 ? (
-                <p className="text-xs text-rose-600 mt-1">
-                  Approver list empty.
-                  {approverError ? (
-                    <span className="block mt-1">Error: {approverError}</span>
-                  ) : (
-                    <span className="block mt-1">
-                      Check `hrmss_approvers` table data (active=true, access='approver') and RLS SELECT policy.
-                    </span>
-                  )}
-                </p>
-              ) : null}
-            </div>
-
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Leave Type</label>
             <select
               value={cType}
               onChange={(e) => setCType(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400"
             >
               {leaveTypes.map((t) => (
                 <option key={t}>{t}</option>
               ))}
             </select>
+          </div>
 
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Mode</label>
             <select
               value={cMode}
               onChange={(e) => {
                 const next = e.target.value;
                 setCMode(next);
 
-                if (next === "Full Day") {
+                if (!needsTime(next)) {
                   setCFromTime("");
                   setCToTime("");
                 } else {
-                  setCTo("");
+                  if (cFrom) setCTo(cFrom);
                 }
               }}
-              className="w-full border rounded-lg px-3 py-2"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400"
             >
               {leaveModes.map((m) => (
                 <option key={m}>{m}</option>
               ))}
             </select>
+          </div>
 
-            <input
-              type="date"
-              value={cFrom}
-              onChange={(e) => setCFrom(e.target.value)}
-              required
-              className="w-full border rounded-lg px-3 py-2"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">From</label>
+              <input
+                type="date"
+                value={cFrom}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCFrom(v);
+                  if (needsTime(cMode)) setCTo(v);
+                }}
+                required
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400"
+              />
+              {cFrom ? (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Showing: <b>{toDMY(cFrom)}</b>
+                </div>
+              ) : null}
+            </div>
 
-            {cMode === "Full Day" && (
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">To</label>
               <input
                 type="date"
                 value={cTo}
                 onChange={(e) => setCTo(e.target.value)}
+                disabled={needsTime(cMode)}
                 required
-                className="w-full border rounded-lg px-3 py-2"
+                className={`w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400 ${
+                  needsTime(cMode) ? "bg-slate-100 cursor-not-allowed" : ""
+                }`}
               />
-            )}
+              {needsTime(cMode) ? (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Half Day / Permission: To date is same as From date.
+                </div>
+              ) : cTo ? (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Showing: <b>{toDMY(cTo)}</b>
+                </div>
+              ) : null}
+            </div>
+          </div>
 
-            {needsTime(cMode) && (
-              <>
-                <TimePreset
-                  onMorning={() => {
-                    setCFromTime("09:00");
-                    setCToTime("13:00");
-                  }}
-                  onAfternoon={() => {
-                    setCFromTime("13:00");
-                    setCToTime("17:00");
-                  }}
-                />
+          {needsTime(cMode) && (
+            <div className="space-y-2">
+              <TimePreset
+                onMorning={() => {
+                  setCFromTime("09:00");
+                  setCToTime("13:00");
+                }}
+                onAfternoon={() => {
+                  setCFromTime("13:00");
+                  setCToTime("17:00");
+                }}
+              />
 
-                <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Time From</label>
                   <input
                     type="time"
                     value={cFromTime}
                     onChange={(e) => setCFromTime(e.target.value)}
                     required
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Time To</label>
                   <input
                     type="time"
                     value={cToTime}
                     onChange={(e) => setCToTime(e.target.value)}
                     required
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400"
                   />
                 </div>
+              </div>
 
-                {calcDuration(cFromTime, cToTime) && (
-                  <div className="text-sm bg-slate-50 border rounded-lg p-2">
-                    ⏱ Duration: <b>{calcDuration(cFromTime, cToTime)}</b>
-                  </div>
-                )}
-              </>
-            )}
+              {calcDuration(shortTime(cFromTime), shortTime(cToTime)) ? (
+                <div className="text-sm bg-slate-50 border border-slate-200 rounded-xl p-2">
+                  ⏱ Duration:{" "}
+                  <b>{calcDuration(shortTime(cFromTime), shortTime(cToTime))}</b>
+                </div>
+              ) : null}
+            </div>
+          )}
 
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Reason</label>
             <textarea
               value={cReason}
               onChange={(e) => setCReason(e.target.value)}
-              rows={3}
+              rows={4}
               required
-              className="w-full border rounded-lg px-3 py-2"
-              placeholder="Reason"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400"
+              placeholder="Write reason..."
             />
+          </div>
 
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCreateOpen(false)}
-                className="px-4 py-2 bg-slate-100 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-lg">
-                Apply
-              </button>
-            </div>
-          </form>
-        </ModalShell>
-      )}
+          <div className="border-t pt-4 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCreateOpen(false)}
+              className="px-4 py-2 rounded-xl text-sm border bg-white hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800"
+            >
+              Apply
+            </button>
+          </div>
+        </form>
+      </ApplyModal>
 
-      {/* EDIT MODAL */}
+      {/* EDIT MODAL (unchanged logic) */}
       {selectedEdit && (
         <ModalShell title="Edit Leave" onClose={() => setEditId(null)}>
           <form onSubmit={saveEdit} className="space-y-3">
-            {/* Request To */}
             <div>
               <label className="block text-xs text-slate-600 mb-1">Request To</label>
               <select
@@ -841,8 +1069,8 @@ export default function EmployeeLeaveManagement() {
               onChange={(e) => {
                 const next = e.target.value;
                 setEMode(next);
-                if (next !== "Full Day") setETo("");
-                if (next === "Full Day") {
+                if (needsTime(next)) setETo(eFrom);
+                if (!needsTime(next)) {
                   setEFromTime("");
                   setEToTime("");
                 }
@@ -857,12 +1085,16 @@ export default function EmployeeLeaveManagement() {
             <input
               type="date"
               value={eFrom}
-              onChange={(e) => setEFrom(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setEFrom(v);
+                if (needsTime(eMode)) setETo(v);
+              }}
               required
               className="w-full border rounded-lg px-3 py-2"
             />
 
-            {eMode === "Full Day" && (
+            {eMode === "Full Day" ? (
               <input
                 type="date"
                 value={eTo}
@@ -870,7 +1102,7 @@ export default function EmployeeLeaveManagement() {
                 required
                 className="w-full border rounded-lg px-3 py-2"
               />
-            )}
+            ) : null}
 
             {needsTime(eMode) && (
               <>
@@ -937,4 +1169,3 @@ export default function EmployeeLeaveManagement() {
     </div>
   );
 }
-

@@ -1,5 +1,6 @@
 // src/pages/hr/Employees.jsx
 import React, { useState, useMemo, useEffect } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
 /* ---------------------- SAMPLE DATA ---------------------- */
@@ -10,14 +11,13 @@ const initialEmployees = [
     department: "AI Engineer",
     role: "UI Developer",
     email: "priya.sharma@example.com",
-    phone: "+94 77 123 4567",
+    phone: "",
     location: "Remote",
-    status: "Active",
     joinDate: "2023-01-10",
     employeeType: "Full-time",
     avatar: "",
     gender: "Female",
-    dob: "1995-04-12",
+    dob: "",
     reportingManager: "CEO",
   },
 ];
@@ -35,14 +35,9 @@ const DEPARTMENTS = [
   "Talent Acquisition Executive",
 ];
 
-const WORK_LOCATIONS = ["Chennai", "Bangalore", "Remote", "Other"];
+const WORK_LOCATIONS = ["Chennai", "Bangalore", "Remote", "Srilanka", "Other"];
 
 /* ---------------------- TAG HELPERS ---------------------- */
-const statusColors = {
-  Active: "bg-emerald-100 text-emerald-700 border border-emerald-200",
-  Inactive: "bg-rose-100 text-rose-700 border border-rose-200",
-};
-
 const departmentColors = {
   Founder: "bg-amber-50 text-amber-700",
   "Finance & HR": "bg-emerald-50 text-emerald-700",
@@ -58,10 +53,56 @@ const departmentColors = {
 const deptPill = (dept) =>
   departmentColors[dept] || "bg-slate-100 text-slate-700";
 
+const generateEmployeeId = (list) => {
+  const numbers = (list || [])
+    .map((emp) => {
+      const match = String(emp?.id || "").match(/\d+/);
+      return match ? parseInt(match[0], 10) : NaN;
+    })
+    .filter((n) => Number.isFinite(n));
+
+  const next = (numbers.length ? Math.max(...numbers) : 0) + 1;
+  const width = Math.max(3, ...numbers.map((n) => String(n).length));
+  let candidate = `EMP-${String(next).padStart(width, "0")}`;
+
+  const idSet = new Set((list || []).map((emp) => String(emp?.id || "")));
+  while (idSet.has(candidate)) {
+    const bump = parseInt(candidate.match(/\d+/)?.[0] || "0", 10) + 1;
+    candidate = `EMP-${String(bump).padStart(width, "0")}`;
+  }
+  return candidate;
+};
+
+/* ---------------------- SMALL UI HELPERS ---------------------- */
+function initials(name) {
+  const s = String(name || "").trim();
+  if (!s) return "E";
+  const parts = s.split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "E";
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+      <div className="text-xs font-semibold text-slate-600">{label}</div>
+      <div className="text-sm text-slate-900 text-right break-words max-w-[65%]">
+        {value}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------- MAIN COMPONENT ---------------------- */
 export default function Employees() {
   const [employees, setEmployees] = useState(initialEmployees);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // ✅ View employee modal
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+
+  // ✅ Show/Hide password (Add modal only)
+  const [showPw, setShowPw] = useState(false);
 
   // 🔍 FILTER STATES
   const [search, setSearch] = useState("");
@@ -70,7 +111,7 @@ export default function Employees() {
 
   // ➕ ADD EMPLOYEE STATE
   const [newEmployee, setNewEmployee] = useState({
-    id: "",
+    email: "",
     password: "",
     name: "",
     department: "",
@@ -79,12 +120,11 @@ export default function Employees() {
     gender: "",
     reportingManager: "",
     joinDate: "",
-    // ✅ Work Location (checkboxes)
     workLocations: [],
     otherWorkLocation: "",
   });
 
-  // ✅ PAGE LOAD: DB-ல இருந்து employee list fetch பண்ணி UI-ல show
+  // ✅ PAGE LOAD: DB fetch
   useEffect(() => {
     const fetchEmployees = async () => {
       if (!isSupabaseConfigured) return;
@@ -106,7 +146,6 @@ export default function Employees() {
             email: r.email || "",
             phone: r.phone || "",
             location: r.location || "",
-            status: r.status || "Active",
             joinDate: r.join_date || "",
             employeeType: r.employee_type || "",
             avatar: r.avatar || "",
@@ -118,12 +157,30 @@ export default function Employees() {
         }
       } catch (err) {
         console.error("Fetch employees failed:", err);
-        // fallback: keep initialEmployees
       }
     };
 
     fetchEmployees();
   }, []);
+
+  // ✅ ESC close view modal
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") closeEmployeeModal();
+    };
+    if (isViewModalOpen) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isViewModalOpen]);
+
+  const openEmployeeModal = (emp) => {
+    setSelectedEmployee(emp);
+    setIsViewModalOpen(true);
+  };
+
+  const closeEmployeeModal = () => {
+    setIsViewModalOpen(false);
+    setSelectedEmployee(null);
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -137,9 +194,7 @@ export default function Employees() {
         ? p.workLocations.filter((x) => x !== loc)
         : [...p.workLocations, loc];
 
-      // If "Other" unchecked, clear other text
       const nextOther = loc === "Other" && exists ? "" : p.otherWorkLocation;
-
       return { ...p, workLocations: next, otherWorkLocation: nextOther };
     });
   };
@@ -158,24 +213,26 @@ export default function Employees() {
   const handleAddEmployee = async (e) => {
     e.preventDefault();
 
+    const email = String(newEmployee.email || "").trim().toLowerCase();
+
     if (
-      !newEmployee.id ||
+      !email ||
       !newEmployee.password ||
       !newEmployee.name ||
       !newEmployee.department
     ) {
-      alert("Employee ID, Password, Name & Department required");
+      alert("Email, Password, Name & Department required");
       return;
     }
 
-    // ✅ Local duplicate check
-    const exists = employees.some(
-      (x) =>
-        String(x.id || "").toLowerCase() ===
-        String(newEmployee.id).toLowerCase()
+    const employeeId = generateEmployeeId(employees);
+
+    // duplicate email check
+    const emailExists = employees.some(
+      (x) => String(x.email || "").toLowerCase() === email
     );
-    if (exists) {
-      alert("This Employee ID already exists");
+    if (emailExists) {
+      alert("This Email already exists");
       return;
     }
 
@@ -184,19 +241,18 @@ export default function Employees() {
       newEmployee.otherWorkLocation
     );
 
-    // ✅ 1) credentials save + 2) details save (persist)
     if (isSupabaseConfigured) {
       try {
-        // 1) Save login credentials (employee_accounts table via RPC)
+        // 1) Save login credentials via RPC (password never shown in UI)
         const { error: credErr } = await supabase.rpc("upsert_employee_account", {
-          p_employee_id: String(newEmployee.id || "").trim(),
+          p_employee_id: employeeId,
           p_password: String(newEmployee.password || ""),
         });
         if (credErr) throw credErr;
 
-        // 2) Save employee details to DB table (so refresh also show)
+        // 2) Save employee details
         const payload = {
-          employee_id: String(newEmployee.id || "").trim(),
+          employee_id: employeeId,
           full_name: String(newEmployee.name || "").trim(),
           department: newEmployee.department || null,
           role: newEmployee.role || null,
@@ -205,8 +261,9 @@ export default function Employees() {
           reporting_manager: newEmployee.reportingManager || null,
           join_date: newEmployee.joinDate || null,
           location: locationText || null,
-          status: "Active",
-          email: null,
+          email: email || null,
+
+          // not collected in add form
           phone: null,
           dob: null,
           avatar: null,
@@ -220,7 +277,6 @@ export default function Employees() {
 
         if (insErr) throw insErr;
 
-        // UI update (password store pannama)
         setEmployees((prev) => [
           {
             id: inserted.employee_id,
@@ -230,7 +286,6 @@ export default function Employees() {
             email: inserted.email || "",
             phone: inserted.phone || "",
             location: inserted.location || "",
-            status: inserted.status || "Active",
             joinDate: inserted.join_date || "",
             employeeType: inserted.employee_type || "",
             avatar: inserted.avatar || "",
@@ -246,29 +301,32 @@ export default function Employees() {
         return;
       }
     } else {
-      console.warn("Supabase not configured. Employee not persisted.");
-
-      // ✅ Do NOT store password in UI state list
-      const { password, ...safeEmployee } = newEmployee;
-
+      // local fallback (no password in list)
       setEmployees((prev) => [
-        ...prev,
         {
-          ...safeEmployee,
-          email: "",
+          id: employeeId,
+          name: newEmployee.name,
+          department: newEmployee.department,
+          role: newEmployee.role,
+          employeeType: newEmployee.employeeType,
+          gender: newEmployee.gender,
+          reportingManager: newEmployee.reportingManager,
+          joinDate: newEmployee.joinDate,
+          location: locationText,
+          email: email,
           phone: "",
-          location: locationText || "",
           dob: "",
-          status: "Active",
           avatar: "",
         },
+        ...prev,
       ]);
     }
 
     setIsAddModalOpen(false);
+    setShowPw(false);
     setNewEmployee({
-      id: "",
       password: "",
+      email: "",
       name: "",
       department: "",
       role: "",
@@ -298,6 +356,28 @@ export default function Employees() {
       return matchSearch && matchDepartment && matchEmployeeType;
     });
   }, [employees, search, departmentFilter, employeeTypeFilter]);
+
+  // ✅ Modal shows ONLY fields that are part of Add form / DB fields you set
+  // ✅ DOB + Phone removed, Status removed
+  const modalFields = useMemo(() => {
+    const e = selectedEmployee;
+    if (!e) return [];
+
+    const fields = [
+      { label: "Department", value: e.department },
+      { label: "Role", value: e.role },
+      { label: "Employee Type", value: e.employeeType },
+      { label: "Gender", value: e.gender },
+      { label: "Join Date", value: e.joinDate },
+      { label: "Reporting Manager", value: e.reportingManager },
+      { label: "Work Location", value: e.location },
+      { label: "Email", value: e.email },
+    ];
+
+    return fields
+      .map((f) => ({ ...f, value: String(f.value || "").trim() }))
+      .filter((f) => f.value);
+  }, [selectedEmployee]);
 
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-6">
@@ -350,6 +430,7 @@ export default function Employees() {
           <option value="Part-time">Part-time</option>
           <option value="Intern">Intern</option>
           <option value="Contract">Contract</option>
+          <option value="Freelancer">Freelancer</option>
         </select>
       </div>
 
@@ -369,9 +450,6 @@ export default function Employees() {
                 Work Location
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold">
                 Join Date
               </th>
             </tr>
@@ -379,7 +457,12 @@ export default function Employees() {
 
           <tbody className="divide-y">
             {filteredEmployees.map((emp) => (
-              <tr key={emp.id} className="hover:bg-slate-50/60">
+              <tr
+                key={emp.id}
+                className="hover:bg-slate-50/60 cursor-pointer"
+                onClick={() => openEmployeeModal(emp)}
+                title="Click to view details"
+              >
                 <td className="px-4 py-3">
                   <div className="font-medium text-slate-900">{emp.name}</div>
                   <div className="text-xs text-slate-500">{emp.id}</div>
@@ -401,17 +484,6 @@ export default function Employees() {
                   {emp.location || "-"}
                 </td>
 
-                <td className="px-4 py-3">
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-1 text-xs ${
-                      statusColors[emp.status] ||
-                      "bg-slate-100 text-slate-700 border border-slate-200"
-                    }`}
-                  >
-                    {emp.status}
-                  </span>
-                </td>
-
                 <td className="px-4 py-3 text-slate-700">
                   {emp.joinDate || "-"}
                 </td>
@@ -427,6 +499,65 @@ export default function Employees() {
         )}
       </div>
 
+      {/* ================= VIEW EMPLOYEE MODAL ================= */}
+      {isViewModalOpen && selectedEmployee && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeEmployeeModal();
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-2xl bg-indigo-50 text-indigo-700 grid place-items-center font-bold overflow-hidden">
+                  {selectedEmployee.avatar ? (
+                    <img
+                      src={selectedEmployee.avatar}
+                      alt={selectedEmployee.name}
+                      className="h-12 w-12 rounded-2xl object-cover"
+                    />
+                  ) : (
+                    initials(selectedEmployee.name)
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-base font-semibold text-slate-900">
+                    {selectedEmployee.name}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {selectedEmployee.id}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeEmployeeModal}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-2">
+              {modalFields.length ? (
+                modalFields.map((f) => (
+                  <InfoRow key={f.label} label={f.label} value={f.value} />
+                ))
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  No details available.
+                </div>
+              )}
+            </div>
+
+            {/* ✅ Status, DOB, Phone removed */}
+          </div>
+        </div>
+      )}
+
       {/* ================= ADD EMPLOYEE MODAL ================= */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
@@ -437,30 +568,48 @@ export default function Employees() {
               </h2>
               <button
                 type="button"
-                onClick={() => setIsAddModalOpen(false)}
+                onClick={() => {
+                  setIsAddModalOpen(false);
+                  setShowPw(false);
+                }}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
               >
                 Close
               </button>
             </div>
 
-            <form onSubmit={handleAddEmployee} className="grid gap-4 md:grid-cols-2">
+            <form
+              onSubmit={handleAddEmployee}
+              className="grid gap-4 md:grid-cols-2"
+            >
               <input
-                name="id"
-                value={newEmployee.id}
+                type="email"
+                name="email"
+                value={newEmployee.email}
                 onChange={handleChange}
-                placeholder="Employee ID *"
+                placeholder="Email *"
                 className="rounded border px-3 py-2"
               />
 
-              <input
-                type="password"
-                name="password"
-                value={newEmployee.password}
-                onChange={handleChange}
-                placeholder="Password *"
-                className="rounded border px-3 py-2"
-              />
+              {/* ✅ Password with show/hide */}
+              <div className="relative">
+                <input
+                  type={showPw ? "text" : "password"}
+                  name="password"
+                  value={newEmployee.password}
+                  onChange={handleChange}
+                  placeholder="Password *"
+                  className="w-full rounded border px-3 py-2 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((s) => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-600 hover:bg-slate-100"
+                  aria-label={showPw ? "Hide password" : "Show password"}
+                >
+                  {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
 
               <input
                 name="name"
@@ -503,6 +652,7 @@ export default function Employees() {
                 <option value="Part-time">Part-time</option>
                 <option value="Intern">Intern</option>
                 <option value="Contract">Contract</option>
+                <option value="Freelancer">Freelancer</option>
               </select>
 
               <select
@@ -534,10 +684,15 @@ export default function Employees() {
 
               {/* ✅ Work Location Checkboxes */}
               <div className="md:col-span-2 rounded-xl border border-slate-200 p-4">
-                <p className="text-sm font-semibold text-slate-900">Work Location</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  Work Location
+                </p>
                 <div className="mt-3 flex flex-wrap gap-4">
                   {WORK_LOCATIONS.map((loc) => (
-                    <label key={loc} className="flex items-center gap-2 text-sm text-slate-700">
+                    <label
+                      key={loc}
+                      className="flex items-center gap-2 text-sm text-slate-700"
+                    >
                       <input
                         type="checkbox"
                         checked={newEmployee.workLocations.includes(loc)}
@@ -567,7 +722,10 @@ export default function Employees() {
 
                 <div className="mt-2 text-xs text-slate-500">
                   Selected:{" "}
-                  {buildLocationText(newEmployee.workLocations, newEmployee.otherWorkLocation) || "—"}
+                  {buildLocationText(
+                    newEmployee.workLocations,
+                    newEmployee.otherWorkLocation
+                  ) || "—"}
                 </div>
               </div>
 
@@ -575,7 +733,10 @@ export default function Employees() {
               <div className="md:col-span-2 flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setShowPw(false);
+                  }}
                   className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
                 >
                   Cancel

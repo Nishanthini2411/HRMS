@@ -12,6 +12,8 @@ import {
   FileText,
 } from "lucide-react";
 
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
+
 const SideItem = ({ to, icon: Icon, label, end }) => (
   <NavLink
     to={to}
@@ -50,6 +52,10 @@ export default function EmployeeLayout() {
   }, [navigate]);
 
   const handleLogout = () => {
+    try {
+      sessionStorage.removeItem(DOCS_AUTH_KEY);
+    } catch {}
+    localStorage.removeItem(DOCS_AUTH_KEY);
     navigate("/login");
   };
 

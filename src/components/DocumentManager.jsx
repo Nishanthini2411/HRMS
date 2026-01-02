@@ -20,6 +20,7 @@ const BUCKET = "hrmss-documents";
 const ALLOWED_ROLES = new Set(["admin", "employee", "hr", "manager"]);
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
 const LEGACY_EMP_SIGNIN_KEY = "hrmss.employee.signin";
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 
 /* ===================== HELPERS ===================== */
 const formatBytes = (bytes) => {
@@ -90,6 +91,16 @@ const readAuthCache = () => {
 const readLegacyEmployeeSignin = () => {
   try {
     const raw = localStorage.getItem(LEGACY_EMP_SIGNIN_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const readDocsAuth = () => {
+  try {
+    const raw =
+      sessionStorage.getItem(DOCS_AUTH_KEY) || localStorage.getItem(DOCS_AUTH_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -167,26 +178,34 @@ export default function DocumentManager({
 
     const authCache = readAuthCache();
     const legacyEmployeeSignin = readLegacyEmployeeSignin();
-    const effectiveRole = resolveEffectiveRole({ roleProp: role, authCache });
+    const docsAuth = readDocsAuth();
+    const effectiveRole = resolveEffectiveRole({ roleProp: role || docsAuth?.role, authCache });
 
     if (!ALLOWED_ROLES.has(effectiveRole)) return null;
 
     const identifier =
       effectiveRole === "employee"
-        ? resolveEmployeeId({ authCache, legacyEmployeeSignin })
+        ? resolveEmployeeId({ authCache, legacyEmployeeSignin }) ||
+          String(docsAuth?.identifier || docsAuth?.email || "").trim()
         : String(
             authCache?.user_id ||
               authCache?.userId ||
               authCache?.id ||
               authCache?.identifier ||
               authCache?.email ||
+              docsAuth?.identifier ||
+              docsAuth?.email ||
               ""
           ).trim();
 
     if (!identifier) return null;
 
-    const preferredEmail = resolvePreferredEmail({ authCache, legacyEmployeeSignin });
-    await ensureRoleAuthSession({ role: effectiveRole, identifier, preferredEmail });
+    const preferredEmail =
+      resolvePreferredEmail({ authCache, legacyEmployeeSignin }) ||
+      String(docsAuth?.preferredEmail || docsAuth?.email || "").trim() ||
+      undefined;
+    const password = docsAuth?.password ? String(docsAuth.password) : undefined;
+    await ensureRoleAuthSession({ role: effectiveRole, identifier, preferredEmail, password });
 
     const { data: sess2, error: sess2Err } = await supabase.auth.getSession();
     if (sess2Err) throw sess2Err;
