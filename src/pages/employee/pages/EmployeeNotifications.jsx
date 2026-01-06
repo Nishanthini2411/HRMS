@@ -1,3 +1,4 @@
+// src/pages/employee/pages/EmployeeNotifications.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -12,67 +13,41 @@ import {
   Trash2,
   BellRing,
   Circle,
+  Loader2,
 } from "lucide-react";
-import { Badge } from "../shared/ui.jsx";
 
-/* ---------------- LOCAL STORAGE ---------------- */
-const LS_KEY = "HRMS_EMP_NOTIFICATIONS_V1";
-const load = () => {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-const save = (list) => localStorage.setItem(LS_KEY, JSON.stringify(list));
+import { supabase } from "../../../lib/supabaseClient";
 
-/* ---------------- DEMO DATA (dynamic with createdAt) ---------------- */
-const seedNotifications = [
-  {
-    id: "N-1001",
-    type: "warning",
-    category: "alerts",
-    title: "Document Expiry Warning",
-    message: "Your passport details are set to expire in 30 days.",
-    unread: true,
-    priority: "HIGH PRIORITY",
-    route: "/employee-dashboard/profile",
-    createdAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
-  },
-  {
-    id: "N-1002",
-    type: "action",
-    category: "approvals",
-    title: "Leave Request #1024",
-    message: "Your leave request requires action.",
-    unread: true,
-    priority: "ACTION REQUIRED",
-    route: "/employee-dashboard/leave",
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
-  },
-  {
-    id: "N-1003",
-    type: "announcement",
-    category: "announcements",
-    title: "New WFH Policy Update",
-    message: "Remote work policy updated effective Nov 1st.",
-    unread: false,
-    priority: "ANNOUNCEMENT",
-    route: "/employee-dashboard/dashboard",
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 8).toISOString(),
-  },
-  {
-    id: "N-1004",
-    type: "info",
-    category: "alerts",
-    title: "Payslip Available",
-    message: "Your payslip is ready for download.",
-    unread: false,
-    route: "/employee-dashboard/payroll",
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
-  },
-];
+/**
+ * ✅ DB table used:
+ * public.employee_notifications
+ * columns: id, user_id, title, message, category, type, priority, route, unread, created_at
+ *
+ * ✅ This file:
+ * - No localStorage
+ * - No fake seed data
+ * - Fetch real notifications for logged-in user
+ * - Mark all read (DB)
+ * - Clear read (DB)
+ * - Delete one (DB)
+ * - Open => mark read (DB) + navigate
+ */
+
+/* ---------------- Small local Badge (no import errors) ---------------- */
+function MiniBadge({ tone = "neutral", children }) {
+  const cls =
+    tone === "warning"
+      ? "bg-amber-50 text-amber-700 border-amber-200"
+      : tone === "info"
+      ? "bg-blue-50 text-blue-700 border-blue-200"
+      : "bg-slate-50 text-slate-700 border-slate-200";
+
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs ${cls}`}>
+      {children}
+    </span>
+  );
+}
 
 /* ---------------- HELPERS ---------------- */
 const fmtTime = (iso) => {
@@ -101,12 +76,11 @@ const dayBucket = (iso) => {
   return "Earlier";
 };
 
-/* -------------------------------------------------- */
 export default function EmployeeNotifications() {
   const navigate = useNavigate();
 
-  // load from localStorage first, else seed
-  const [list, setList] = useState(() => load() ?? seedNotifications);
+  const [userId, setUserId] = useState(null);
+  const [list, setList] = useState([]);
 
   // UI state
   const [activeTab, setActiveTab] = useState("all"); // all | alerts | approvals | announcements
@@ -117,7 +91,82 @@ export default function EmployeeNotifications() {
   const [priorityFilter, setPriorityFilter] = useState("all"); // all | HIGH PRIORITY | ACTION REQUIRED | ANNOUNCEMENT
   const [showFilters, setShowFilters] = useState(false);
 
-  useEffect(() => save(list), [list]);
+  // Loading / error
+  const [loading, setLoading] = useState(true);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const mapRow = (n) => ({
+    id: n.id,
+    title: n.title,
+    message: n.message,
+    category: n.category || "alerts",
+    type: n.type || "info",
+    priority: n.priority || "",
+    route: n.route || "/employee-dashboard/dashboard",
+    unread: n.unread ?? true,
+    createdAt: n.created_at,
+  });
+
+  const fetchNotifications = async (uid) => {
+    const { data, error } = await supabase
+      .from("employee_notifications")
+      .select("id,title,message,category,type,priority,route,unread,created_at")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return (data ?? []).map(mapRow);
+  };
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setErrorMsg("");
+
+      try {
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+
+        if (userErr) throw userErr;
+
+        if (!user?.id) {
+          setUserId(null);
+          setList([]);
+          setErrorMsg("Not logged in. Please sign in again.");
+          setLoading(false);
+          return;
+        }
+
+        setUserId(user.id);
+
+        const rows = await fetchNotifications(user.id);
+        setList(rows);
+      } catch (e) {
+        console.error("Notifications fetch failed:", e);
+        setErrorMsg(e?.message || "Failed to load notifications");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const refresh = async () => {
+    if (!userId) return;
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      const rows = await fetchNotifications(userId);
+      setList(rows);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e?.message || "Failed to refresh notifications");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const counts = useMemo(() => {
     const base = { all: 0, alerts: 0, approvals: 0, announcements: 0 };
@@ -128,15 +177,95 @@ export default function EmployeeNotifications() {
     return base;
   }, [list]);
 
-  const markAllRead = () => setList((prev) => prev.map((n) => ({ ...n, unread: false })));
+  const markAllRead = async () => {
+    if (!userId) return;
+    setActionBusy(true);
+    setErrorMsg("");
+    try {
+      const { error } = await supabase
+        .from("employee_notifications")
+        .update({ unread: false })
+        .eq("user_id", userId)
+        .eq("unread", true);
 
-  const clearRead = () => setList((prev) => prev.filter((n) => n.unread));
+      if (error) throw error;
 
-  const deleteOne = (id) => setList((prev) => prev.filter((n) => n.id !== id));
+      setList((prev) => prev.map((n) => ({ ...n, unread: false })));
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e?.message || "Failed to mark all as read");
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-  const openNotification = (item) => {
-    setList((prev) => prev.map((n) => (n.id === item.id ? { ...n, unread: false } : n)));
-    navigate(item.route);
+  const clearRead = async () => {
+    if (!userId) return;
+    setActionBusy(true);
+    setErrorMsg("");
+    try {
+      const { error } = await supabase
+        .from("employee_notifications")
+        .delete()
+        .eq("user_id", userId)
+        .eq("unread", false);
+
+      if (error) throw error;
+
+      setList((prev) => prev.filter((n) => n.unread));
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e?.message || "Failed to clear read notifications");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const deleteOne = async (id) => {
+    if (!userId) return;
+    setActionBusy(true);
+    setErrorMsg("");
+    try {
+      const { error } = await supabase
+        .from("employee_notifications")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      setList((prev) => prev.filter((n) => n.id !== id));
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e?.message || "Failed to delete notification");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openNotification = async (item) => {
+    if (!userId) return;
+    setErrorMsg("");
+
+    try {
+      if (item.unread) {
+        const { error } = await supabase
+          .from("employee_notifications")
+          .update({ unread: false })
+          .eq("id", item.id)
+          .eq("user_id", userId);
+
+        if (error) throw error;
+
+        setList((prev) => prev.map((n) => (n.id === item.id ? { ...n, unread: false } : n)));
+      }
+
+      navigate(item.route || "/employee-dashboard/dashboard");
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e?.message || "Failed to open notification");
+      navigate(item.route || "/employee-dashboard/dashboard");
+    }
   };
 
   const filtered = useMemo(() => {
@@ -182,26 +311,44 @@ export default function EmployeeNotifications() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
-      {/* LEFT SIDE → LIST */}
+      {/* LEFT SIDE */}
       <div className="flex-1 space-y-5">
         {/* HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-slate-900">Notifications</h1>
-              <Badge tone="neutral">
+
+              <MiniBadge tone="neutral">
                 <span className="inline-flex items-center gap-1">
                   <BellRing size={14} /> {counts.all} unread
                 </span>
-              </Badge>
+              </MiniBadge>
+
+              <button
+                onClick={refresh}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs hover:bg-slate-50"
+                disabled={loading || actionBusy}
+                title="Refresh"
+              >
+                {loading ? <Loader2 className="animate-spin" size={14} /> : "Refresh"}
+              </button>
             </div>
+
             <p className="text-sm text-slate-500">Employee alerts, approvals & announcements</p>
+
+            {errorMsg && (
+              <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {errorMsg}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={markAllRead}
-              className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+              disabled={actionBusy || loading || !userId}
+              className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60"
             >
               <CheckCheck size={16} />
               Mark all read
@@ -209,7 +356,8 @@ export default function EmployeeNotifications() {
 
             <button
               onClick={clearRead}
-              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50"
+              disabled={actionBusy || loading || !userId}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-60"
               title="Remove all read notifications"
             >
               <Trash2 size={16} />
@@ -218,7 +366,7 @@ export default function EmployeeNotifications() {
           </div>
         </div>
 
-        {/* SEARCH + FILTER BAR */}
+        {/* SEARCH + FILTER */}
         <div className="space-y-3">
           <div className="flex items-center gap-2 rounded-2xl border bg-white px-4 py-2">
             <Search size={16} className="text-slate-400" />
@@ -300,9 +448,18 @@ export default function EmployeeNotifications() {
           )}
         </div>
 
-        {/* GROUPED LIST */}
+        {/* LIST */}
         <div className="space-y-5">
-          {filtered.length === 0 && (
+          {loading && (
+            <div className="rounded-3xl border bg-white p-10 text-center">
+              <div className="mx-auto mb-3 h-12 w-12 rounded-2xl border bg-slate-50 grid place-items-center">
+                <Loader2 size={20} className="animate-spin text-slate-600" />
+              </div>
+              <p className="text-sm text-slate-600 font-medium">Loading notifications…</p>
+            </div>
+          )}
+
+          {!loading && filtered.length === 0 && (
             <div className="rounded-3xl border bg-white p-10 text-center">
               <div className="mx-auto mb-3 h-12 w-12 rounded-2xl border bg-slate-50 grid place-items-center">
                 <Circle size={20} className="text-slate-500" />
@@ -312,33 +469,35 @@ export default function EmployeeNotifications() {
             </div>
           )}
 
-          {grouped.map((group) => (
-            <div key={group.label} className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                  {group.label}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {group.items.length} item{group.items.length > 1 ? "s" : ""}
-                </p>
-              </div>
+          {!loading &&
+            grouped.map((group) => (
+              <div key={group.label} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    {group.label}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {group.items.length} item{group.items.length > 1 ? "s" : ""}
+                  </p>
+                </div>
 
-              <div className="space-y-3">
-                {group.items.map((n) => (
-                  <NotificationCard
-                    key={n.id}
-                    data={n}
-                    onOpen={() => openNotification(n)}
-                    onDelete={() => deleteOne(n.id)}
-                  />
-                ))}
+                <div className="space-y-3">
+                  {group.items.map((n) => (
+                    <NotificationCard
+                      key={n.id}
+                      data={n}
+                      onOpen={() => openNotification(n)}
+                      onDelete={() => deleteOne(n.id)}
+                      disabled={actionBusy}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
         </div>
       </div>
 
-      {/* RIGHT SIDE → CATEGORIES */}
+      {/* RIGHT SIDE */}
       <div className="lg:w-72 space-y-3">
         <div className="rounded-3xl border bg-white p-4">
           <p className="text-sm font-semibold text-slate-900">Categories</p>
@@ -381,6 +540,7 @@ export default function EmployeeNotifications() {
           <ul className="mt-2 text-xs text-slate-600 space-y-1">
             <li>• Click a notification to open the related page.</li>
             <li>• Use “Clear read” to keep the list clean.</li>
+            <li>• Refresh to fetch latest DB updates.</li>
           </ul>
         </div>
       </div>
@@ -407,14 +567,12 @@ function Category({ icon: Icon, label, count, active, onClick }) {
         {label}
       </span>
 
-      <span className="rounded-full bg-blue-600 text-white text-xs px-2 py-0.5">
-        {count}
-      </span>
+      <span className="rounded-full bg-blue-600 text-white text-xs px-2 py-0.5">{count}</span>
     </button>
   );
 }
 
-function NotificationCard({ data, onOpen, onDelete }) {
+function NotificationCard({ data, onOpen, onDelete, disabled }) {
   const iconMap = {
     warning: AlertTriangle,
     action: FileText,
@@ -432,7 +590,7 @@ function NotificationCard({ data, onOpen, onDelete }) {
       ? "border-l-violet-500"
       : "border-l-emerald-400";
 
-  const timeText = data.createdAt ? fmtTime(data.createdAt) : data.time || "";
+  const timeText = data.createdAt ? fmtTime(data.createdAt) : "";
 
   return (
     <div
@@ -449,9 +607,9 @@ function NotificationCard({ data, onOpen, onDelete }) {
           <h3 className="font-semibold text-slate-900 truncate">{data.title}</h3>
 
           {data.priority && (
-            <Badge tone={data.priority === "HIGH PRIORITY" ? "warning" : "info"}>
+            <MiniBadge tone={data.priority === "HIGH PRIORITY" ? "warning" : "info"}>
               {data.priority}
-            </Badge>
+            </MiniBadge>
           )}
 
           {data.unread && (
@@ -470,7 +628,8 @@ function NotificationCard({ data, onOpen, onDelete }) {
           <div className="flex items-center gap-2">
             <button
               onClick={onDelete}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs hover:bg-slate-50"
+              disabled={disabled}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
               title="Delete"
             >
               <Trash2 size={14} />
@@ -479,7 +638,8 @@ function NotificationCard({ data, onOpen, onDelete }) {
 
             <button
               onClick={onOpen}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white px-3 py-2 text-xs hover:bg-slate-800"
+              disabled={disabled}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-60"
               title="Open"
             >
               Open

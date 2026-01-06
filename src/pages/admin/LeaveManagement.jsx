@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
-/* ---------------- DEMO USERS (replace later with auth) ---------------- */
-/* ✅ FIX: get current logged-in user from localStorage (fallback to demo) */
+/* ---------------- STORAGE HELPERS ---------------- */
 const safeJson = (v) => {
   try {
     return JSON.parse(v);
@@ -11,40 +10,47 @@ const safeJson = (v) => {
   }
 };
 
-const normalizeUser = (obj, fallback) => {
-  if (!obj || typeof obj !== "object") return fallback;
+const normalizeUser = (obj) => {
+  if (!obj || typeof obj !== "object") return null;
 
   const id =
-    obj.id ||
     obj.employee_id ||
     obj.employeeId ||
+    obj.emp_id ||
+    obj.empId ||
     obj.admin_id ||
     obj.adminId ||
     obj.user_id ||
     obj.userId ||
     obj.identifier ||
-    obj.empId ||
-    fallback.id;
+    obj.id ||
+    "";
 
   const name =
-    obj.name ||
     obj.employee_name ||
     obj.employeeName ||
     obj.admin_name ||
     obj.adminName ||
     obj.full_name ||
     obj.fullName ||
+    obj.name ||
     obj.username ||
     obj.user_name ||
-    fallback.name;
+    "";
 
-  return { id: String(id || fallback.id), name: String(name || fallback.name) };
+  const normId = String(id || "").trim();
+  const normName = String(name || "").trim();
+
+  if (!normId) return null;
+  return { id: normId, name: normName || normId };
 };
 
-const getUserFromStorage = (wantedRole, fallback) => {
-  if (typeof window === "undefined") return fallback;
+const getUserFromStorage = (wantedRole) => {
+  if (typeof window === "undefined") return null;
 
+  // ✅ include your common key too
   const likelyKeys = [
+    "HRMSS_AUTH_SESSION",
     "hrmss.session",
     "hrmss.auth",
     "hrmss.user",
@@ -58,13 +64,16 @@ const getUserFromStorage = (wantedRole, fallback) => {
     "admin_session",
     "adminSession",
     "ADMIN_SESSION",
+    "hrmss.employee.signin",
   ];
 
   const matchesRole = (o) => {
-    const role =
-      (o?.role || o?.userRole || o?.type || o?.user_type || o?.userType || "")
-        .toString()
-        .toLowerCase();
+    const role = String(
+      o?.role || o?.userRole || o?.type || o?.user_type || o?.userType || ""
+    )
+      .toLowerCase()
+      .trim();
+
     if (!role) return null;
     if (wantedRole === "employee" && role.includes("employee")) return true;
     if (wantedRole === "admin" && role.includes("admin")) return true;
@@ -77,29 +86,27 @@ const getUserFromStorage = (wantedRole, fallback) => {
     if (!raw) continue;
     const parsed = safeJson(raw);
 
-    // sometimes session is nested: { user: {...}, role: ... } or { profile: {...} }
     const candidates = [parsed, parsed?.user, parsed?.profile, parsed?.data];
-
     for (const c of candidates) {
-      if (!c) continue;
       const mr = matchesRole(c);
-      if (mr === true) return normalizeUser(c, fallback);
+      if (mr === true) return normalizeUser(c);
     }
 
-    // if no explicit role, still allow if id prefix matches
-    if (parsed && typeof parsed === "object") {
-      const u = normalizeUser(parsed?.user || parsed, fallback);
-      const up = (u.id || "").toUpperCase();
+    // if no explicit role, use ID prefix
+    const u = normalizeUser(parsed?.user || parsed);
+    if (u?.id) {
+      const up = u.id.toUpperCase();
       if (wantedRole === "employee" && up.startsWith("EMP")) return u;
       if (wantedRole === "admin" && up.startsWith("ADM")) return u;
     }
   }
 
-  // 2) scan all localStorage entries (best-effort)
+  // 2) scan all localStorage entries
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
       if (!key) continue;
+
       const raw = window.localStorage.getItem(key);
       const parsed = safeJson(raw);
       if (!parsed || typeof parsed !== "object") continue;
@@ -107,34 +114,29 @@ const getUserFromStorage = (wantedRole, fallback) => {
       const candidates = [parsed, parsed?.user, parsed?.profile, parsed?.data];
       for (const c of candidates) {
         const mr = matchesRole(c);
-        if (mr === true) return normalizeUser(c, fallback);
+        if (mr === true) return normalizeUser(c);
       }
 
-      const u = normalizeUser(parsed?.user || parsed, fallback);
-      const up = (u.id || "").toUpperCase();
-      if (wantedRole === "employee" && up.startsWith("EMP")) return u;
-      if (wantedRole === "admin" && up.startsWith("ADM")) return u;
+      const u = normalizeUser(parsed?.user || parsed);
+      if (u?.id) {
+        const up = u.id.toUpperCase();
+        if (wantedRole === "employee" && up.startsWith("EMP")) return u;
+        if (wantedRole === "admin" && up.startsWith("ADM")) return u;
+      }
     }
   } catch {
     // ignore
   }
 
-  return fallback;
+  return null;
 };
 
-const currentEmployee = getUserFromStorage("employee", {
-  id: "EMP-001",
-  name: "Priya Sharma",
-});
-
-const currentAdmin = getUserFromStorage("admin", {
-  id: "ADM-001",
-  name: "Admin User",
-});
-
 /* ---------------- TABLE NAMES ---------------- */
-const EMP_TABLE = "employee_leaves";
+// NOTE: Employee view safest source = hrmss_leave_requests (owner_role/owner_id)
+// Admin apply table = admin_leaves (your existing flow)
 const ADM_TABLE = "admin_leaves";
+const APPROVERS_TABLE = "hrmss_approvers";
+const LEAVES_TABLE = "hrmss_leave_requests";
 
 /* ---------------- HELPERS ---------------- */
 const diffDaysInclusive = (from, to) => {
@@ -165,22 +167,18 @@ const roleBadge = (role) => {
   return `${base} bg-slate-50 text-slate-700 border-slate-200`;
 };
 
-// ✅ Date format: DD-MM-YYYY (display only)
 const pad2 = (n) => String(n).padStart(2, "0");
 const fmtDMY = (v) => {
   if (!v) return "-";
   const s = String(v);
 
-  // if "YYYY-MM-DD" (avoid timezone issues)
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const [yy, mm, dd] = s.split("-");
     return `${dd}-${mm}-${yy}`;
   }
 
-  // if ISO datetime
   const d = new Date(s);
   if (!Number.isFinite(d.getTime())) return s;
-
   return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
 };
 
@@ -202,7 +200,6 @@ const initials = (name = "") => {
 };
 
 const computeHoursText = (tFrom, tTo) => {
-  // expects "HH:MM"
   if (!tFrom || !tTo) return "";
   const [fh, fm] = tFrom.split(":").map(Number);
   const [th, tm] = tTo.split(":").map(Number);
@@ -218,34 +215,32 @@ const computeHoursText = (tFrom, tTo) => {
   return `${h} hr ${m} min`;
 };
 
-/* ---------------- MAPPER: DB -> UI ---------------- */
-const mapEmployeeDbToUi = (r) => ({
-  id: r.id,
-  ownerRole: "employee",
-  ownerId: r.employee_id,
-  ownerName: r.employee_name,
-  leaveType: r.leave_type,
-  leaveMode: r.mode || "Full Day",
-  from: r.from_date,
-  to: r.to_date || r.from_date,
-  timeFrom: r.time_from || "",
-  timeTo: r.time_to || "",
-  hours: r.hours || "",
-  reason: r.reason,
-  status: r.status,
-  appliedAt: r.applied_at,
-  decisionNote: "",
-  decidedAt: "",
-  // ✅ optional (if you add in employee table later)
-  requestedTo: r.requested_to || r.request_to || r.requestedTo || [],
-  halfSession: r.half_session || r.halfSession || "",
-});
+const fetchManagerApprovers = async () => {
+  const { data, error } = await supabase
+    .from(APPROVERS_TABLE)
+    .select("id,name,role,access,active")
+    .eq("active", true)
+    .eq("role", "manager")
+    .order("name", { ascending: true });
 
-const mapAdminDbToUi = (r) => ({
+  if (error) throw error;
+
+  return (data || [])
+    .map((r) => ({
+      id: String(r.id),
+      name: String(r.name || ""),
+      access: String(r.access || ""),
+    }))
+    .filter((m) => m.id && m.name);
+};
+
+/* ---------------- MAPPER: DB -> UI ---------------- */
+// ✅ Employee view from hrmss_leave_requests
+const mapRequestsDbToUi = (r) => ({
   id: r.id,
-  ownerRole: "admin",
-  ownerId: r.admin_id,
-  ownerName: r.admin_name,
+  ownerRole: r.owner_role || "employee",
+  ownerId: r.owner_id || "",
+  ownerName: r.owner_name || "",
   leaveType: r.leave_type,
   leaveMode: r.mode || "Full Day",
   from: r.from_date,
@@ -256,12 +251,10 @@ const mapAdminDbToUi = (r) => ({
   reason: r.reason,
   status: r.status,
   appliedAt: r.applied_at,
-  decisionNote: "",
-  decidedAt: "",
-  // ✅ NEW: who this request is sent to (HR/Manager)
-  requestedTo: r.requested_to || r.request_to || r.requestedTo || [],
-  // ✅ NEW: half session (First/Second)
-  halfSession: r.half_session || r.halfSession || "",
+  requestedTo: r.requested_to || [], // optional
+  halfSession: r.half_session || "",
+  requestToName: r.request_to_name || "",
+  requestToRole: r.request_to_role || "",
 });
 
 const showTimeLine = (r) => {
@@ -287,6 +280,10 @@ const calcDaysDisplay = (r) => {
 const LeaveManagement = () => {
   const [mode, setMode] = useState("employee"); // "employee" | "admin"
 
+  // ✅ TRUE users only
+  const currentEmployee = useMemo(() => getUserFromStorage("employee"), []);
+  const currentAdmin = useMemo(() => getUserFromStorage("admin"), []);
+
   // ✅ data from Supabase
   const [requests, setRequests] = useState([]);
 
@@ -295,7 +292,7 @@ const LeaveManagement = () => {
 
   // Apply form fields (Admin)
   const [leaveType, setLeaveType] = useState("Casual Leave");
-  const [leaveMode, setLeaveMode] = useState("Full Day"); // Full Day | Half Day | Permission
+  const [leaveMode, setLeaveMode] = useState("Full Day");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [timeFrom, setTimeFrom] = useState("");
@@ -303,14 +300,13 @@ const LeaveManagement = () => {
   const [hours, setHours] = useState("");
   const [reason, setReason] = useState("");
 
-  // ✅ NEW: Request To (HR/Manager) multiple select
+  // Request To (HR/Manager)
   const APPROVER_OPTIONS = ["HR", "Manager"];
   const [requestedTo, setRequestedTo] = useState(["HR", "Manager"]);
 
-  // ✅ NEW: Half Day session (First/Second)
   const [halfSession, setHalfSession] = useState("First Half");
 
-  // Filters (both)
+  // Filters
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
 
@@ -330,7 +326,6 @@ const LeaveManagement = () => {
     setTimeTo("");
     setHours("");
     setReason("");
-    // ✅ default both selected
     setRequestedTo(["HR", "Manager"]);
     setHalfSession("First Half");
   };
@@ -344,7 +339,6 @@ const LeaveManagement = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  // when leaveMode changes, clean irrelevant fields (but KEEP time for Half Day now)
   useEffect(() => {
     if (leaveMode === "Full Day") {
       setTimeFrom("");
@@ -353,19 +347,16 @@ const LeaveManagement = () => {
     }
     if (leaveMode === "Half Day") {
       setTo("");
-      // ✅ show First/Second half options and auto time
       setHalfSession("First Half");
       setTimeFrom("09:00");
       setTimeTo("13:30");
     }
     if (leaveMode === "Permission") {
       setTo("");
-      // time stays (needed)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaveMode]);
 
-  // ✅ auto set time for Half Day based on session
   useEffect(() => {
     if (leaveMode !== "Half Day") return;
     if (halfSession === "First Half") {
@@ -378,7 +369,6 @@ const LeaveManagement = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [halfSession, leaveMode]);
 
-  // auto compute hours when time changes (Permission + Half Day)
   useEffect(() => {
     if (leaveMode !== "Permission" && leaveMode !== "Half Day") return;
     const h = computeHoursText(timeFrom, timeTo);
@@ -386,7 +376,6 @@ const LeaveManagement = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeFrom, timeTo, leaveMode]);
 
-  // ESC close for view/apply modal
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") {
@@ -401,45 +390,58 @@ const LeaveManagement = () => {
   /* ---------------- FETCH FROM SUPABASE ---------------- */
   const fetchRequests = async (activeMode = mode) => {
     try {
+      // ✅ employee: fetch from hrmss_leave_requests using owner_role/owner_id
       if (activeMode === "employee") {
+        if (!currentEmployee?.id) {
+          setRequests([]);
+          return;
+        }
+
         const { data, error } = await supabase
-          .from(EMP_TABLE)
+          .from(LEAVES_TABLE)
           .select("*")
-          .eq("employee_id", currentEmployee.id)
+          .eq("owner_role", "employee")
+          .eq("owner_id", currentEmployee.id)
           .order("applied_at", { ascending: false });
 
         if (error) throw error;
-        setRequests((data || []).map(mapEmployeeDbToUi));
+        setRequests((data || []).map(mapRequestsDbToUi));
+        return;
+      }
+
+      // ✅ admin: show admin leaves from hrmss_leave_requests too (owner_role admin)
+      // (optional) if you want admin to see only their own request routing entries
+      if (!currentAdmin?.id) {
+        setRequests([]);
         return;
       }
 
       const { data, error } = await supabase
-        .from(ADM_TABLE)
+        .from(LEAVES_TABLE)
         .select("*")
-        .eq("admin_id", currentAdmin.id)
+        .eq("owner_role", "admin")
+        .eq("owner_id", currentAdmin.id)
         .order("applied_at", { ascending: false });
 
       if (error) throw error;
-      setRequests((data || []).map(mapAdminDbToUi));
+      setRequests((data || []).map(mapRequestsDbToUi));
     } catch (err) {
-      alert(err.message || "Failed to load leaves");
+      alert(err?.message || "Failed to load leaves");
     }
   };
 
   useEffect(() => {
     fetchRequests(mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, currentEmployee?.id, currentAdmin?.id]);
 
   /* ---------------- REALTIME: auto refresh ---------------- */
   useEffect(() => {
-    const tableName = mode === "employee" ? EMP_TABLE : ADM_TABLE;
-
     const channel = supabase
-      .channel(`${tableName}_changes`)
+      .channel(`leaves_requests_changes_${mode}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: tableName },
+        { event: "*", schema: "public", table: LEAVES_TABLE },
         () => fetchRequests(mode)
       )
       .subscribe();
@@ -448,31 +450,30 @@ const LeaveManagement = () => {
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, currentEmployee?.id, currentAdmin?.id]);
 
   /* ---------------- ROLE DATASET ---------------- */
   const dataset = useMemo(() => {
     if (mode === "employee") {
+      if (!currentEmployee?.id) return [];
       return requests.filter(
         (r) => r.ownerRole === "employee" && r.ownerId === currentEmployee.id
       );
     }
-    return requests.filter(
-      (r) => r.ownerRole === "admin" && r.ownerId === currentAdmin.id
-    );
-  }, [mode, requests]);
+    if (!currentAdmin?.id) return [];
+    return requests.filter((r) => r.ownerRole === "admin" && r.ownerId === currentAdmin.id);
+  }, [mode, requests, currentEmployee?.id, currentAdmin?.id]);
 
   const filtered = useMemo(() => {
     let list = [...dataset];
 
-    if (statusFilter !== "All")
-      list = list.filter((r) => r.status === statusFilter);
+    if (statusFilter !== "All") list = list.filter((r) => r.status === statusFilter);
 
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
         (r) =>
-          (r.id || "").toLowerCase().includes(q) ||
+          (String(r.id || "")).toLowerCase().includes(q) ||
           (r.leaveType || "").toLowerCase().includes(q) ||
           (r.leaveMode || "").toLowerCase().includes(q) ||
           (r.reason || "").toLowerCase().includes(q) ||
@@ -495,8 +496,7 @@ const LeaveManagement = () => {
 
   const summaryList = useMemo(() => {
     let list = [...dataset];
-    if (summaryStatus !== "All")
-      list = list.filter((r) => r.status === summaryStatus);
+    if (summaryStatus !== "All") list = list.filter((r) => r.status === summaryStatus);
     list.sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
     return list;
   }, [dataset, summaryStatus]);
@@ -506,21 +506,24 @@ const LeaveManagement = () => {
     setSummaryOpen(true);
   };
 
-  // ✅ NEW: toggle approvers (max 2)
   const toggleRequestedTo = (role) => {
     setRequestedTo((prev) => {
       const has = prev.includes(role);
       if (has) return prev.filter((x) => x !== role);
-      if (prev.length >= 2) return prev; // max 2
+      if (prev.length >= 2) return prev;
       return [...prev, role];
     });
   };
 
-  /* ---------------- APPLY (ADMIN ONLY) -> SUPABASE INSERT ---------------- */
+  /* ---------------- APPLY (ADMIN ONLY) ---------------- */
   const submitLeave = async () => {
     if (mode !== "admin") return;
 
-    // ✅ validate requestedTo
+    if (!currentAdmin?.id) {
+      alert("Admin session not found. Please login again.");
+      return;
+    }
+
     if (!requestedTo || requestedTo.length === 0) {
       alert("Please choose Request To (HR / Manager).");
       return;
@@ -559,41 +562,159 @@ const LeaveManagement = () => {
       }
     }
 
-    const payload = {
-      admin_id: currentAdmin.id,
-      admin_name: currentAdmin.name,
+    const isTimed = leaveMode === "Permission" || leaveMode === "Half Day";
+    const toDateForDb = leaveMode === "Full Day" ? to : from;
+
+    const commonFields = {
       leave_type: leaveType,
       mode: leaveMode,
       from_date: from,
-      to_date: leaveMode === "Full Day" ? to : from,
-      time_from:
-        leaveMode === "Permission" || leaveMode === "Half Day" ? timeFrom : null,
-      time_to:
-        leaveMode === "Permission" || leaveMode === "Half Day" ? timeTo : null,
-      hours:
-        leaveMode === "Permission" || leaveMode === "Half Day"
-          ? hours || computeHoursText(timeFrom, timeTo)
-          : null,
+      to_date: toDateForDb,
+      time_from: isTimed ? timeFrom : null,
+      time_to: isTimed ? timeTo : null,
+      hours: isTimed ? (hours || computeHoursText(timeFrom, timeTo)) : null,
       reason: reason.trim(),
       status: "Pending",
+      applied_at: new Date().toISOString(),
+    };
 
-      // ✅ NEW fields (make sure these columns exist in admin_leaves)
-      requested_to: requestedTo, // Postgres: text[] (recommended) or jsonb
+    // 1) ✅ Save admin's own leave in admin_leaves (your table)
+    const payloadAdminLeaves = {
+      admin_id: currentAdmin.id,
+      admin_name: currentAdmin.name,
+      ...commonFields,
+      requested_to: requestedTo, // recommended: text[] or jsonb
       half_session: leaveMode === "Half Day" ? halfSession : null,
     };
 
-    const { error } = await supabase.from(ADM_TABLE).insert(payload);
-    if (error) {
-      alert(error.message);
+    const { error: saveAdminErr } = await supabase.from(ADM_TABLE).insert(payloadAdminLeaves);
+    if (saveAdminErr) {
+      alert(saveAdminErr.message);
       return;
+    }
+
+    // 2) ✅ Also create routing rows in hrmss_leave_requests (so it appears in manager/hr approvals)
+    // If you only want manager routing, keep your logic. Here I keep manager routing same as yours.
+    const requestedTargets = requestedTo
+      .map((r) => String(r || "").trim().toLowerCase())
+      .filter(Boolean);
+
+    let managerSendError = "";
+    if (requestedTargets.includes("manager")) {
+      try {
+        const managers = await fetchManagerApprovers();
+        if (!managers.length) {
+          managerSendError = "No managers found in approver list.";
+        } else {
+          const approverMgr = managers.find((m) => m.access === "approver");
+          const viewerMgrs = managers.filter((m) => m.access === "viewer");
+
+          if (!approverMgr) {
+            managerSendError = "No approver manager found.";
+          } else {
+            const commonRequest = {
+              owner_role: "admin",
+              owner_id: currentAdmin.id,
+              owner_name: currentAdmin.name,
+              request_to_role: "manager",
+              ...commonFields,
+            };
+
+            const rowsToInsert = [
+              {
+                ...commonRequest,
+                request_to_id: approverMgr.id,
+                request_to_name: approverMgr.name,
+              },
+              ...viewerMgrs.map((v) => ({
+                ...commonRequest,
+                request_to_id: v.id,
+                request_to_name: v.name,
+              })),
+            ];
+
+            const { error: mgrError } = await supabase
+              .from(LEAVES_TABLE)
+              .insert(rowsToInsert);
+
+            if (mgrError) managerSendError = mgrError.message;
+          }
+        }
+      } catch (mgrError) {
+        managerSendError = mgrError?.message || "Failed to send to manager.";
+      }
     }
 
     resetApplyForm();
     setShowApply(false);
     fetchRequests(mode);
+
+    if (managerSendError) {
+      alert(`Leave saved, but manager request failed: ${managerSendError}`);
+      return;
+    }
+
     alert("Leave request submitted!");
   };
 
+  /* ---------------- GUARD UI (NO FAKE DATA) ---------------- */
+  const needsLogin =
+    (mode === "employee" && !currentEmployee?.id) ||
+    (mode === "admin" && !currentAdmin?.id);
+
+  if (needsLogin) {
+    return (
+      <section className="space-y-4">
+        <div className="bg-white border rounded-2xl p-6">
+          <h1 className="text-2xl font-semibold">Leave Letters</h1>
+          <p className="text-sm text-gray-600 mt-2">
+            {mode === "employee"
+              ? "Employee session not found. Please login as Employee."
+              : "Admin session not found. Please login as Admin."}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="bg-white border border-gray-200 rounded-xl p-1 flex shadow-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setMode("employee");
+                setShowApply(false);
+                setSearch("");
+                setStatusFilter("All");
+                setSummaryOpen(false);
+                setViewing(null);
+              }}
+              className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
+                mode === "employee" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              Employee
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode("admin");
+                setSearch("");
+                setStatusFilter("All");
+                setSummaryOpen(false);
+                setViewing(null);
+              }}
+              className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
+                mode === "admin" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              Admin
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  /* ---------------- UI (unchanged mostly) ---------------- */
   return (
     <section className="space-y-4">
       {/* Header + Toggle + Apply button */}
@@ -621,9 +742,7 @@ const LeaveManagement = () => {
                 setViewing(null);
               }}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-                mode === "employee"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-700 hover:bg-gray-50"
+                mode === "employee" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
               }`}
             >
               Employee
@@ -639,16 +758,14 @@ const LeaveManagement = () => {
                 setViewing(null);
               }}
               className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-                mode === "admin"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-700 hover:bg-gray-50"
+                mode === "admin" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"
               }`}
             >
               Admin
             </button>
           </div>
 
-          {/* ✅ Apply Button ONLY for Admin */}
+          {/* Apply Button ONLY for Admin */}
           {mode === "admin" && (
             <button
               type="button"
@@ -661,7 +778,7 @@ const LeaveManagement = () => {
         </div>
       </div>
 
-      {/* ✅ ADMIN APPLY LEAVE MODAL (SMALL) */}
+      {/* ADMIN APPLY LEAVE MODAL (SMALL) */}
       {mode === "admin" && showApply && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -669,9 +786,7 @@ const LeaveManagement = () => {
             if (e.target === e.currentTarget) setShowApply(false);
           }}
         >
-          {/* ✅ smaller width + scroll inside */}
           <div className="w-full max-w-[620px] bg-white rounded-2xl shadow-2xl border overflow-hidden">
-            {/* header */}
             <div className="px-5 py-4 border-b flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold">Apply Leave</div>
@@ -690,10 +805,8 @@ const LeaveManagement = () => {
               </button>
             </div>
 
-            {/* body (scroll if height small) */}
             <div className="px-5 py-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-1 gap-3">
-                {/* ✅ NEW: Request To (HR/Manager) */}
                 <div className="border border-gray-200 rounded-xl p-3">
                   <div className="text-xs text-gray-500 mb-2">Request To</div>
                   <div className="flex flex-wrap gap-2">
@@ -724,7 +837,6 @@ const LeaveManagement = () => {
                   </div>
                 </div>
 
-                {/* Leave Type */}
                 <select
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
                   value={leaveType}
@@ -736,7 +848,6 @@ const LeaveManagement = () => {
                   <option>Paid Leave</option>
                 </select>
 
-                {/* Mode */}
                 <select
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
                   value={leaveMode}
@@ -747,13 +858,10 @@ const LeaveManagement = () => {
                   <option>Permission</option>
                 </select>
 
-                {/* Full Day dates */}
                 {leaveMode === "Full Day" && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        From
-                      </label>
+                      <label className="block text-xs text-gray-500 mb-1">From</label>
                       <input
                         type="date"
                         className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -762,9 +870,7 @@ const LeaveManagement = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        To
-                      </label>
+                      <label className="block text-xs text-gray-500 mb-1">To</label>
                       <input
                         type="date"
                         className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -775,13 +881,10 @@ const LeaveManagement = () => {
                   </div>
                 )}
 
-                {/* ✅ Half Day: Date + First/Second Half (with fixed time) */}
                 {leaveMode === "Half Day" && (
                   <>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Date
-                      </label>
+                      <label className="block text-xs text-gray-500 mb-1">Date</label>
                       <input
                         type="date"
                         className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -790,7 +893,6 @@ const LeaveManagement = () => {
                       />
                     </div>
 
-                    {/* ✅ NEW: first half / second half */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
@@ -802,13 +904,7 @@ const LeaveManagement = () => {
                         }`}
                       >
                         <div className="text-sm font-semibold">First Half</div>
-                        <div
-                          className={`text-xs mt-1 ${
-                            halfSession === "First Half"
-                              ? "text-white/80"
-                              : "text-gray-500"
-                          }`}
-                        >
+                        <div className={`text-xs mt-1 ${halfSession === "First Half" ? "text-white/80" : "text-gray-500"}`}>
                           09:00 → 13:30
                         </div>
                       </button>
@@ -823,55 +919,39 @@ const LeaveManagement = () => {
                         }`}
                       >
                         <div className="text-sm font-semibold">Second Half</div>
-                        <div
-                          className={`text-xs mt-1 ${
-                            halfSession === "Second Half"
-                              ? "text-white/80"
-                              : "text-gray-500"
-                          }`}
-                        >
+                        <div className={`text-xs mt-1 ${halfSession === "Second Half" ? "text-white/80" : "text-gray-500"}`}>
                           14:00 → 17:30
                         </div>
                       </button>
                     </div>
 
-                    {/* show fixed time (readonly) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Time From
-                        </label>
+                        <label className="block text-xs text-gray-500 mb-1">Time From</label>
                         <input
                           type="time"
                           readOnly
                           className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none bg-gray-50"
                           value={timeFrom}
-                          onChange={(e) => setTimeFrom(e.target.value)}
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Time To
-                        </label>
+                        <label className="block text-xs text-gray-500 mb-1">Time To</label>
                         <input
                           type="time"
                           readOnly
                           className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none bg-gray-50"
                           value={timeTo}
-                          onChange={(e) => setTimeTo(e.target.value)}
                         />
                       </div>
                     </div>
                   </>
                 )}
 
-                {/* Permission date + time */}
                 {leaveMode === "Permission" && (
                   <>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Date
-                      </label>
+                      <label className="block text-xs text-gray-500 mb-1">Date</label>
                       <input
                         type="date"
                         className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -882,9 +962,7 @@ const LeaveManagement = () => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Time From
-                        </label>
+                        <label className="block text-xs text-gray-500 mb-1">Time From</label>
                         <input
                           type="time"
                           className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -893,9 +971,7 @@ const LeaveManagement = () => {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Time To
-                        </label>
+                        <label className="block text-xs text-gray-500 mb-1">Time To</label>
                         <input
                           type="time"
                           className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -906,9 +982,7 @@ const LeaveManagement = () => {
                     </div>
 
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Hours (optional)
-                      </label>
+                      <label className="block text-xs text-gray-500 mb-1">Hours (optional)</label>
                       <input
                         type="text"
                         className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -920,7 +994,6 @@ const LeaveManagement = () => {
                   </>
                 )}
 
-                {/* Reason */}
                 <textarea
                   rows={4}
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-base outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400"
@@ -931,7 +1004,6 @@ const LeaveManagement = () => {
               </div>
             </div>
 
-            {/* footer buttons */}
             <div className="px-5 py-4 border-t flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -957,34 +1029,22 @@ const LeaveManagement = () => {
 
       {/* Summary (CLICKABLE) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <button
-          onClick={() => openSummary("All")}
-          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
-        >
+        <button onClick={() => openSummary("All")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Total</div>
           <div className="text-xl font-semibold">{counts.total}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
         </button>
-        <button
-          onClick={() => openSummary("Pending")}
-          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
-        >
+        <button onClick={() => openSummary("Pending")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Pending</div>
           <div className="text-xl font-semibold">{counts.pending}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
         </button>
-        <button
-          onClick={() => openSummary("Approved")}
-          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
-        >
+        <button onClick={() => openSummary("Approved")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Approved</div>
           <div className="text-xl font-semibold">{counts.approved}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
         </button>
-        <button
-          onClick={() => openSummary("Rejected")}
-          className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition"
-        >
+        <button onClick={() => openSummary("Rejected")} className="text-left bg-white border rounded-xl p-3 hover:shadow-sm transition">
           <div className="text-xs text-gray-500">Rejected</div>
           <div className="text-xl font-semibold">{counts.rejected}</div>
           <div className="text-[11px] text-gray-400 mt-1">Click to view list</div>
@@ -1052,8 +1112,7 @@ const LeaveManagement = () => {
                         <div className="min-w-0">
                           <div className="font-semibold">{r.leaveType}</div>
                           <div className="text-xs text-gray-500 mt-0.5">
-                            Mode:{" "}
-                            <span className="font-semibold">{r.leaveMode}</span>
+                            Mode: <span className="font-semibold">{r.leaveMode}</span>
                             {r.leaveMode === "Half Day" && r.halfSession ? (
                               <>
                                 {" "}
@@ -1063,13 +1122,16 @@ const LeaveManagement = () => {
                             {showTimeLine(r)}
                           </div>
 
-                          {/* ✅ show requested to */}
-                          {Array.isArray(r.requestedTo) && r.requestedTo.length > 0 && (
+                          {/* routing info */}
+                          {(r.requestToName || r.requestToRole) && (
                             <div className="text-xs text-gray-500">
-                              Request To:{" "}
+                              Sent To:{" "}
                               <span className="font-semibold">
-                                {r.requestedTo.join(", ")}
+                                {r.requestToName || "-"}
                               </span>
+                              {r.requestToRole ? (
+                                <span className="ml-2 font-semibold">({r.requestToRole})</span>
+                              ) : null}
                             </div>
                           )}
 
@@ -1092,8 +1154,7 @@ const LeaveManagement = () => {
                       </div>
                       <div className="mt-1">
                         <span className={roleBadge(r.ownerRole)}>
-                          Employment:{" "}
-                          {r.ownerRole === "employee" ? "Employee" : "Admin"}
+                          Employment: {r.ownerRole === "employee" ? "Employee" : "Admin"}
                         </span>
                       </div>
                     </td>
@@ -1102,11 +1163,6 @@ const LeaveManagement = () => {
 
                     <td className="px-4 py-3">
                       <span className={pill(r.status)}>{r.status}</span>
-                      {r.decidedAt && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          Decided: {r.decidedAt}
-                        </div>
-                      )}
                     </td>
 
                     <td className="px-4 py-3">
@@ -1135,14 +1191,10 @@ const LeaveManagement = () => {
             <div className="p-5 border-b flex items-start justify-between gap-3">
               <div>
                 <div className="text-lg font-semibold">
-                  {summaryStatus === "All"
-                    ? "All Leave Letters"
-                    : `${summaryStatus} Leave Letters`}
+                  {summaryStatus === "All" ? "All Leave Letters" : `${summaryStatus} Leave Letters`}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Showing:{" "}
-                  <span className="font-semibold">{summaryList.length}</span>{" "}
-                  requests • Mode:{" "}
+                  Showing: <span className="font-semibold">{summaryList.length}</span> requests • Mode:{" "}
                   <span className="font-semibold">{mode.toUpperCase()}</span>
                 </div>
               </div>
@@ -1158,17 +1210,13 @@ const LeaveManagement = () => {
 
             <div className="p-5">
               {summaryList.length === 0 ? (
-                <div className="text-sm text-gray-500 py-10 text-center">
-                  No records found.
-                </div>
+                <div className="text-sm text-gray-500 py-10 text-center">No records found.</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50 text-gray-600">
                       <tr>
-                        <th className="text-left px-4 py-3 font-medium">
-                          Employee Details
-                        </th>
+                        <th className="text-left px-4 py-3 font-medium">Owner</th>
                         <th className="text-left px-4 py-3 font-medium">Leave</th>
                         <th className="text-left px-4 py-3 font-medium">Dates</th>
                         <th className="text-left px-4 py-3 font-medium">Status</th>
@@ -1180,62 +1228,32 @@ const LeaveManagement = () => {
                       {summaryList.map((r) => {
                         const { date, time } = fmtDT(r.appliedAt);
                         const days = calcDaysDisplay(r);
-
                         return (
                           <tr key={`sum-${r.id}`} className="hover:bg-gray-50">
                             <td className="px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">
-                                  {initials(r.ownerName)}
-                                </div>
-                                <div>
-                                  <div className="font-semibold">{r.ownerName}</div>
-                                  <div className="text-xs text-gray-500">
-                                    ID:{" "}
-                                    <span className="font-semibold">{r.ownerId}</span>
-                                  </div>
-                                  <div className="mt-1">
-                                    <span className={roleBadge(r.ownerRole)}>
-                                      Employment:{" "}
-                                      {r.ownerRole === "employee"
-                                        ? "Employee"
-                                        : "Admin"}
-                                    </span>
-                                  </div>
-                                </div>
+                              <div className="font-semibold">{r.ownerName}</div>
+                              <div className="text-xs text-gray-500">{r.ownerId}</div>
+                              <div className="mt-1">
+                                <span className={roleBadge(r.ownerRole)}>
+                                  {r.ownerRole === "employee" ? "Employee" : "Admin"}
+                                </span>
                               </div>
                             </td>
 
                             <td className="px-4 py-3">
                               <div className="font-semibold">{r.leaveType}</div>
                               <div className="text-xs text-gray-500">
-                                Mode:{" "}
-                                <span className="font-semibold">{r.leaveMode}</span>
+                                Mode: <span className="font-semibold">{r.leaveMode}</span>
                                 {r.leaveMode === "Half Day" && r.halfSession ? (
                                   <>
                                     {" "}
-                                    •{" "}
-                                    <span className="font-semibold">{r.halfSession}</span>
+                                    • <span className="font-semibold">{r.halfSession}</span>
                                   </>
                                 ) : null}
                                 {showTimeLine(r)}
                               </div>
-
-                              {/* ✅ show request to */}
-                              {Array.isArray(r.requestedTo) && r.requestedTo.length > 0 && (
-                                <div className="text-xs text-gray-500">
-                                  Request To:{" "}
-                                  <span className="font-semibold">
-                                    {r.requestedTo.join(", ")}
-                                  </span>
-                                </div>
-                              )}
-
                               <div className="text-xs text-gray-500">
                                 #{String(r.id).slice(0, 8)} • Applied: {date} {time}
-                              </div>
-                              <div className="text-xs text-gray-600 mt-1 line-clamp-2">
-                                {r.reason}
                               </div>
                             </td>
 
@@ -1300,9 +1318,7 @@ const LeaveManagement = () => {
                   Leave request
                 </p>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold">
-                    #{String(viewing.id).slice(0, 8)}
-                  </span>
+                  <span className="text-lg font-semibold">#{String(viewing.id).slice(0, 8)}</span>
                   <span className={pill(viewing.status)}>{viewing.status}</span>
                 </div>
                 <p className="text-xs text-white/80 mt-1">
@@ -1315,16 +1331,6 @@ const LeaveManagement = () => {
                   ) : null}
                   {showTimeLine(viewing)}
                 </p>
-
-                {/* ✅ show request to */}
-                {Array.isArray(viewing.requestedTo) && viewing.requestedTo.length > 0 && (
-                  <p className="text-xs text-white/80 mt-1">
-                    Request To:{" "}
-                    <span className="font-semibold">
-                      {viewing.requestedTo.join(", ")}
-                    </span>
-                  </p>
-                )}
               </div>
               <button
                 type="button"
@@ -1360,39 +1366,28 @@ const LeaveManagement = () => {
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                   <p className="text-[11px] text-slate-500">Days</p>
-                  <p className="font-semibold text-slate-900">
-                    {calcDaysDisplay(viewing)}
-                  </p>
+                  <p className="font-semibold text-slate-900">{calcDaysDisplay(viewing)}</p>
                 </div>
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                   <p className="text-[11px] text-slate-500">Applied</p>
-                  <p className="font-semibold text-slate-900">
-                    {fmtDT(viewing.appliedAt).date}
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    {fmtDT(viewing.appliedAt).time}
-                  </p>
+                  <p className="font-semibold text-slate-900">{fmtDT(viewing.appliedAt).date}</p>
+                  <p className="text-[11px] text-slate-500">{fmtDT(viewing.appliedAt).time}</p>
                 </div>
               </div>
 
-              {(viewing.leaveMode === "Permission" ||
-                viewing.leaveMode === "Half Day") && (
+              {(viewing.leaveMode === "Permission" || viewing.leaveMode === "Half Day") && (
                 <div className="rounded-xl bg-white border border-slate-100 p-3">
                   <p className="text-[11px] text-slate-500">Time</p>
                   <p className="mt-1 text-slate-800">
                     {viewing.timeFrom || "-"} → {viewing.timeTo || "-"}
-                    {viewing.hours ? (
-                      <span className="text-slate-500"> • {viewing.hours}</span>
-                    ) : null}
+                    {viewing.hours ? <span className="text-slate-500"> • {viewing.hours}</span> : null}
                   </p>
                 </div>
               )}
 
               <div className="rounded-xl bg-white border border-slate-100 p-3">
                 <p className="text-[11px] text-slate-500">Reason</p>
-                <p className="mt-1 text-slate-800 leading-relaxed">
-                  {viewing.reason || "-"}
-                </p>
+                <p className="mt-1 text-slate-800 leading-relaxed">{viewing.reason || "-"}</p>
               </div>
             </div>
           </div>

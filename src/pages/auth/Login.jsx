@@ -17,23 +17,6 @@ import { ensureAdminSupabaseSession } from "../../lib/employeeAuthBridge";
 
 const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 
-/**
- * IMPORTANT (for Documents Upload):
- * Supabase Storage/Table policies usually need a Supabase Auth session (auth.uid()).
- * If you see "Email not confirmed" or "Invalid login credentials" during ensureAdminSupabaseSession,
- * you MUST create/confirm those users in Supabase Auth (Dashboard → Authentication → Users)
- * OR disable Email confirmations for the project.
- *
- * ✅ Quick company-demo fix:
- *  - Supabase Dashboard → Authentication → Users → "Add user"
- *  - Create users:
- *      HR@twite.ai / Twite@hr      (Auto confirm ON)
- *      arun.murugappa@twite.ai / Twite@arun (Auto confirm ON)
- *      sunil.reddy@twite.ai / Twite@sunil  (Auto confirm ON)
- *    + (Optional) Employee shadow emails like EMP-001@employee.twite.local with their password (Auto confirm ON)
- */
-
-/* ---------------- Field ---------------- */
 const Field = forwardRef(
   (
     { icon: Icon, type = "text", placeholder, right, autoComplete, required },
@@ -60,6 +43,8 @@ const Field = forwardRef(
   }
 );
 Field.displayName = "Field";
+
+
 
 /* ---------------- Login ---------------- */
 export default function Login() {

@@ -96,6 +96,32 @@ const calcDuration = (from, to) => {
   }`;
 };
 
+const normalizeRequestedTo = (raw) => {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean).map(String);
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s) return [];
+    if (s.startsWith("[") || s.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
+      } catch {
+        // ignore parse errors
+      }
+    }
+    if (s.includes(",")) return s.split(",").map((x) => x.trim()).filter(Boolean);
+    return [s];
+  }
+  return [String(raw)];
+};
+
+const includesHrRequest = (raw) => {
+  const list = normalizeRequestedTo(raw);
+  if (!list.length) return true;
+  return list.some((v) => String(v).toLowerCase() === "hr");
+};
+
 const diffDaysInclusive = (from, to) => {
   const a = new Date(from);
   const b = new Date(to);
@@ -271,7 +297,11 @@ export default function LeaveManagement() {
       };
     });
 
-    const list2 = (r2.data || []).map((r) => {
+    const list2 = (r2.data || [])
+      .filter((r) =>
+        includesHrRequest(r.requested_to ?? r.request_to ?? r.requestedTo)
+      )
+      .map((r) => {
       const mode = (r.mode ?? "").toString();
       const fromDate = r.from_date;
       const toDate = r.to_date || r.from_date;

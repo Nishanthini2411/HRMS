@@ -26,7 +26,10 @@ const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 const formatBytes = (bytes) => {
   if (!bytes && bytes !== 0) return "-";
   const units = ["B", "KB", "MB", "GB"];
-  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const idx = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
   const val = bytes / Math.pow(1024, idx);
   return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 };
@@ -36,7 +39,8 @@ const getFileType = (file) => {
   if (t.includes("pdf")) return "PDF";
   if (t.includes("image")) return "IMAGE";
   if (t.includes("word") || t.includes("doc")) return "WORD";
-  if (t.includes("excel") || t.includes("sheet") || t.includes("xls")) return "EXCEL";
+  if (t.includes("excel") || t.includes("sheet") || t.includes("xls"))
+    return "EXCEL";
   return "FILE";
 };
 
@@ -108,7 +112,11 @@ const readDocsAuth = () => {
 };
 
 const resolveEffectiveRole = ({ roleProp, authCache } = {}) => {
-  const r = String(roleProp || authCache?.loginRole || authCache?.role || "").trim().toLowerCase();
+  const r = String(
+    roleProp || authCache?.loginRole || authCache?.role || ""
+  )
+    .trim()
+    .toLowerCase();
   return r || "";
 };
 
@@ -154,7 +162,13 @@ export default function DocumentManager({
   subtitle,
   accent = "blue",
   role,
-  categoryOptions = ["Offer Letter", "Payslip", "Appointment Letter", "HR Policy", "Other"],
+  categoryOptions = [
+    "Offer Letter",
+    "Payslip",
+    "Appointment Letter",
+    "HR Policy",
+    "Other",
+  ],
 }) {
   const theme = accentMap[accent] || accentMap.blue;
   const fileRef = useRef(null);
@@ -170,6 +184,8 @@ export default function DocumentManager({
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState("");
 
+  const pageRole = String(role || "").trim().toLowerCase();
+
   /* ---------- AUTH: ensure Supabase session (employee bridge) ---------- */
   const ensureDocsAuthSession = async () => {
     const { data: sess, error: sessErr } = await supabase.auth.getSession();
@@ -179,7 +195,11 @@ export default function DocumentManager({
     const authCache = readAuthCache();
     const legacyEmployeeSignin = readLegacyEmployeeSignin();
     const docsAuth = readDocsAuth();
-    const effectiveRole = resolveEffectiveRole({ roleProp: role || docsAuth?.role, authCache });
+
+    const effectiveRole = resolveEffectiveRole({
+      roleProp: role || docsAuth?.role,
+      authCache,
+    });
 
     if (!ALLOWED_ROLES.has(effectiveRole)) return null;
 
@@ -204,8 +224,15 @@ export default function DocumentManager({
       resolvePreferredEmail({ authCache, legacyEmployeeSignin }) ||
       String(docsAuth?.preferredEmail || docsAuth?.email || "").trim() ||
       undefined;
+
     const password = docsAuth?.password ? String(docsAuth.password) : undefined;
-    await ensureRoleAuthSession({ role: effectiveRole, identifier, preferredEmail, password });
+
+    await ensureRoleAuthSession({
+      role: effectiveRole,
+      identifier,
+      preferredEmail,
+      password,
+    });
 
     const { data: sess2, error: sess2Err } = await supabase.auth.getSession();
     if (sess2Err) throw sess2Err;
@@ -222,7 +249,7 @@ export default function DocumentManager({
     return data?.session?.user || null;
   };
 
-  /* ---------- LOAD DOCS ---------- */
+  /* ---------- LOAD DOCS (✅ role-wise + own docs only) ---------- */
   const loadDocs = async () => {
     try {
       setErrMsg("");
@@ -235,11 +262,18 @@ export default function DocumentManager({
         return;
       }
 
-      const { data, error } = await supabase
+      let q = supabase
         .from(DOCS_TABLE)
         .select("*")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
+      // ✅ This makes each page show only that role docs
+      if (pageRole && ALLOWED_ROLES.has(pageRole)) {
+        q = q.eq("role", pageRole);
+      }
+
+      const { data, error } = await q;
       if (error) throw error;
 
       setDocs((data || []).map(mapRowToUi));
@@ -263,9 +297,13 @@ export default function DocumentManager({
 
     const channel = supabase
       .channel("hrmss_documents_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: DOCS_TABLE }, () => {
-        loadDocs();
-      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: DOCS_TABLE },
+        () => {
+          loadDocs();
+        }
+      )
       .subscribe();
 
     return () => {
@@ -298,6 +336,12 @@ export default function DocumentManager({
       const user = await getAuthedUser();
       must(user?.id, "Please login (Supabase Auth) to upload documents.");
 
+      // ✅ Ensure role is always present (so role-wise pages work)
+      must(
+        pageRole && ALLOWED_ROLES.has(pageRole),
+        "Role missing/invalid. Cannot upload without role."
+      );
+
       const userId = user.id;
       const fileName = safeFileName(file.name);
       const stamp = Date.now();
@@ -306,17 +350,19 @@ export default function DocumentManager({
       const storagePath = `${userId}/${stamp}_${fileName}`;
 
       // 1) upload to storage
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(storagePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: file.type || undefined,
-      });
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || undefined,
+        });
       if (upErr) throw upErr;
 
       // 2) insert to db
       const payload = {
         user_id: userId,
-        role: role && ALLOWED_ROLES.has(String(role).toLowerCase()) ? String(role).toLowerCase() : null,
+        role: pageRole, // ✅ always set
         title: docTitle.trim(),
         category,
         file_name: fileName,
@@ -393,10 +439,15 @@ export default function DocumentManager({
       const user = await getAuthedUser();
       must(user?.id, "Please login (Supabase Auth) to delete documents.");
 
-      const { error: delErr } = await supabase.from(DOCS_TABLE).delete().eq("id", doc.id);
+      const { error: delErr } = await supabase
+        .from(DOCS_TABLE)
+        .delete()
+        .eq("id", doc.id);
       if (delErr) throw delErr;
 
-      const { error: stoErr } = await supabase.storage.from(doc.bucket || BUCKET).remove([doc.storagePath]);
+      const { error: stoErr } = await supabase.storage
+        .from(doc.bucket || BUCKET)
+        .remove([doc.storagePath]);
       if (stoErr) console.warn("storage remove error:", stoErr);
 
       setDocs((p) => p.filter((d) => d.id !== doc.id));
@@ -431,7 +482,9 @@ export default function DocumentManager({
         <div className="flex items-center gap-2">
           <button
             onClick={() => setView("table")}
-            className={`p-2 rounded-lg border ${view === "table" ? theme.solid : "bg-white"} ${theme.hover}`}
+            className={`p-2 rounded-lg border ${
+              view === "table" ? theme.solid : "bg-white"
+            } ${theme.hover}`}
             aria-label="Table view"
             type="button"
           >
@@ -439,7 +492,9 @@ export default function DocumentManager({
           </button>
           <button
             onClick={() => setView("grid")}
-            className={`p-2 rounded-lg border ${view === "grid" ? theme.solid : "bg-white"} ${theme.hover}`}
+            className={`p-2 rounded-lg border ${
+              view === "grid" ? theme.solid : "bg-white"
+            } ${theme.hover}`}
             aria-label="Grid view"
             type="button"
           >
@@ -473,7 +528,11 @@ export default function DocumentManager({
                 {formatBytes(file.size)} • {getFileType(file)}
               </div>
             </div>
-            <button onClick={() => setFile(null)} className="text-xs underline" type="button">
+            <button
+              onClick={() => setFile(null)}
+              className="text-xs underline"
+              type="button"
+            >
               Remove
             </button>
           </div>
@@ -564,13 +623,21 @@ export default function DocumentManager({
                 <tr key={d.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex gap-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(d.type)}`}>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
+                          d.type
+                        )}`}
+                      >
                         {d.type}
                       </span>
                       <div className="min-w-0">
                         <div className="font-semibold">{d.title}</div>
-                        <div className="text-xs text-gray-500 truncate">{d.fileName}</div>
-                        <div className="text-[11px] text-gray-400 mt-0.5">{d.date}</div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {d.fileName}
+                        </div>
+                        <div className="text-[11px] text-gray-400 mt-0.5">
+                          {d.date}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -617,12 +684,18 @@ export default function DocumentManager({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.length === 0 ? (
-            <div className="rounded-2xl border bg-white p-6 text-sm text-gray-500">No documents found</div>
+            <div className="rounded-2xl border bg-white p-6 text-sm text-gray-500">
+              No documents found
+            </div>
           ) : null}
 
           {filtered.map((d) => (
             <div key={d.id} className="bg-white border rounded-2xl p-4 shadow-sm">
-              <span className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(d.type)}`}>
+              <span
+                className={`inline-block mb-2 px-2 py-0.5 rounded-full text-xs font-semibold ${badgeColor(
+                  d.type
+                )}`}
+              >
                 {d.type}
               </span>
               <h3 className="font-semibold truncate">{d.title}</h3>
@@ -631,13 +704,28 @@ export default function DocumentManager({
               <p className="text-[11px] text-gray-400 mt-2">{d.date}</p>
 
               <div className="flex justify-end gap-3 mt-4">
-                <button type="button" onClick={() => openSignedUrl(d, "view")} disabled={busy} title="View">
+                <button
+                  type="button"
+                  onClick={() => openSignedUrl(d, "view")}
+                  disabled={busy}
+                  title="View"
+                >
                   <Eye size={16} />
                 </button>
-                <button type="button" onClick={() => openSignedUrl(d, "download")} disabled={busy} title="Download">
+                <button
+                  type="button"
+                  onClick={() => openSignedUrl(d, "download")}
+                  disabled={busy}
+                  title="Download"
+                >
                   <Download size={16} />
                 </button>
-                <button type="button" onClick={() => remove(d)} disabled={busy} title="Delete">
+                <button
+                  type="button"
+                  onClick={() => remove(d)}
+                  disabled={busy}
+                  title="Delete"
+                >
                   <Trash2 size={16} className="text-rose-600" />
                 </button>
               </div>
@@ -647,7 +735,8 @@ export default function DocumentManager({
       )}
 
       <p className="text-xs text-gray-400">
-        Connected to Supabase (Storage + DB). Users will see only their own documents (RLS).
+        Connected to Supabase (Storage + DB). Users will see only their own documents (RLS) +
+        only this page role documents.
       </p>
     </section>
   );

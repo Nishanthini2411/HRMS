@@ -131,7 +131,7 @@ const seedPayslips = [
 const payslipTemplateSeed = {
   "PS-001": {
     company: {
-      name: "TechCorp Solutions Pvt. Ltd.",
+      name: "Twite AI Technologies",
       address: "Plot 45, Electronic City, Bengaluru, Karnataka - 560100",
     },
     employee: {
