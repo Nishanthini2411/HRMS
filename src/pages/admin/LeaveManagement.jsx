@@ -69,7 +69,14 @@ const getUserFromStorage = (wantedRole) => {
 
   const matchesRole = (o) => {
     const role = String(
-      o?.role || o?.userRole || o?.type || o?.user_type || o?.userType || ""
+      o?.role ||
+        o?.loginRole ||
+        o?.login_role ||
+        o?.userRole ||
+        o?.type ||
+        o?.user_type ||
+        o?.userType ||
+        ""
     )
       .toLowerCase()
       .trim();
@@ -236,11 +243,11 @@ const fetchManagerApprovers = async () => {
 
 /* ---------------- MAPPER: DB -> UI ---------------- */
 // ✅ Employee view from hrmss_leave_requests
-const mapRequestsDbToUi = (r) => ({
+const mapRequestsDbToUi = (r, nameMap = new Map()) => ({
   id: r.id,
   ownerRole: r.owner_role || "employee",
   ownerId: r.owner_id || "",
-  ownerName: r.owner_name || "",
+  ownerName: nameMap.get(String(r.owner_id || "")) || r.owner_name || "",
   leaveType: r.leave_type,
   leaveMode: r.mode || "Full Day",
   from: r.from_date,
@@ -392,20 +399,67 @@ const LeaveManagement = () => {
     try {
       // ✅ employee: fetch from hrmss_leave_requests using owner_role/owner_id
       if (activeMode === "employee") {
-        if (!currentEmployee?.id) {
+        if (!currentEmployee?.id && !currentAdmin?.id) {
           setRequests([]);
           return;
         }
 
-        const { data, error } = await supabase
+        let query = supabase
           .from(LEAVES_TABLE)
           .select("*")
-          .eq("owner_role", "employee")
-          .eq("owner_id", currentEmployee.id)
-          .order("applied_at", { ascending: false });
+          .eq("owner_role", "employee");
+
+        if (currentEmployee?.id && !currentAdmin?.id) {
+          query = query.eq("owner_id", currentEmployee.id);
+        }
+
+        const { data, error } = await query.order("applied_at", {
+          ascending: false,
+        });
 
         if (error) throw error;
-        setRequests((data || []).map(mapRequestsDbToUi));
+        const rows = data || [];
+        const ids = [
+          ...new Set(
+            rows
+              .map((r) => String(r.owner_id || ""))
+              .filter((id) => id)
+          ),
+        ];
+        const nameMap = new Map();
+
+        if (ids.length) {
+          const empRes = await supabase
+            .from("hrmss_employees")
+            .select("employee_id, full_name")
+            .in("employee_id", ids);
+
+          if (!empRes.error) {
+            (empRes.data || []).forEach((row) => {
+              if (row?.employee_id) {
+                nameMap.set(String(row.employee_id), row.full_name || "");
+              }
+            });
+          }
+
+          const missing = ids.filter((id) => !nameMap.get(id));
+          if (missing.length) {
+            const profRes = await supabase
+              .from("hrmss_employee_profiles")
+              .select("employee_id, full_name")
+              .in("employee_id", missing);
+
+            if (!profRes.error) {
+              (profRes.data || []).forEach((row) => {
+                if (row?.employee_id && !nameMap.get(String(row.employee_id))) {
+                  nameMap.set(String(row.employee_id), row.full_name || "");
+                }
+              });
+            }
+          }
+        }
+
+        setRequests(rows.map((row) => mapRequestsDbToUi(row, nameMap)));
         return;
       }
 
@@ -424,7 +478,33 @@ const LeaveManagement = () => {
         .order("applied_at", { ascending: false });
 
       if (error) throw error;
-      setRequests((data || []).map(mapRequestsDbToUi));
+      const rows = data || [];
+      const ids = [
+        ...new Set(
+          rows
+            .map((r) => String(r.owner_id || ""))
+            .filter((id) => id)
+        ),
+      ];
+      const nameMap = new Map();
+
+      if (ids.length) {
+        const adminRes = await supabase
+          .from("hrmss_profiles")
+          .select("employee_id, full_name")
+          .in("employee_id", ids)
+          .eq("role", "admin");
+
+        if (!adminRes.error) {
+          (adminRes.data || []).forEach((row) => {
+            if (row?.employee_id) {
+              nameMap.set(String(row.employee_id), row.full_name || "");
+            }
+          });
+        }
+      }
+
+      setRequests(rows.map((row) => mapRequestsDbToUi(row, nameMap)));
     } catch (err) {
       alert(err?.message || "Failed to load leaves");
     }
@@ -455,13 +535,20 @@ const LeaveManagement = () => {
   /* ---------------- ROLE DATASET ---------------- */
   const dataset = useMemo(() => {
     if (mode === "employee") {
-      if (!currentEmployee?.id) return [];
-      return requests.filter(
-        (r) => r.ownerRole === "employee" && r.ownerId === currentEmployee.id
-      );
+      if (currentEmployee?.id) {
+        return requests.filter(
+          (r) => r.ownerRole === "employee" && r.ownerId === currentEmployee.id
+        );
+      }
+      if (currentAdmin?.id) {
+        return requests.filter((r) => r.ownerRole === "employee");
+      }
+      return [];
     }
     if (!currentAdmin?.id) return [];
-    return requests.filter((r) => r.ownerRole === "admin" && r.ownerId === currentAdmin.id);
+    return requests.filter(
+      (r) => r.ownerRole === "admin" && r.ownerId === currentAdmin.id
+    );
   }, [mode, requests, currentEmployee?.id, currentAdmin?.id]);
 
   const filtered = useMemo(() => {
@@ -658,8 +745,9 @@ const LeaveManagement = () => {
   };
 
   /* ---------------- GUARD UI (NO FAKE DATA) ---------------- */
+  const canViewEmployeeMode = Boolean(currentEmployee?.id || currentAdmin?.id);
   const needsLogin =
-    (mode === "employee" && !currentEmployee?.id) ||
+    (mode === "employee" && !canViewEmployeeMode) ||
     (mode === "admin" && !currentAdmin?.id);
 
   if (needsLogin) {
@@ -723,7 +811,9 @@ const LeaveManagement = () => {
           <h1 className="text-2xl font-semibold">Leave Letters</h1>
           <p className="text-sm text-gray-600">
             {mode === "employee"
-              ? "Employee can view only their own leave letters."
+              ? currentAdmin?.id
+                ? "Admin can view all employee leave letters."
+                : "Employee can view only their own leave letters."
               : "Admin can apply leave and view only their own leave letters."}
           </p>
         </div>
@@ -1136,7 +1226,7 @@ const LeaveManagement = () => {
                           )}
 
                           <div className="text-xs text-gray-500">
-                            #{String(r.id).slice(0, 8)} • Applied: {date} {time}
+                            Applied: {date} {time}
                           </div>
                           <div className="text-xs text-gray-600 mt-1 line-clamp-2">
                             {r.reason}
@@ -1253,7 +1343,7 @@ const LeaveManagement = () => {
                                 {showTimeLine(r)}
                               </div>
                               <div className="text-xs text-gray-500">
-                                #{String(r.id).slice(0, 8)} • Applied: {date} {time}
+                                Applied: {date} {time}
                               </div>
                             </td>
 
@@ -1318,7 +1408,6 @@ const LeaveManagement = () => {
                   Leave request
                 </p>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold">#{String(viewing.id).slice(0, 8)}</span>
                   <span className={pill(viewing.status)}>{viewing.status}</span>
                 </div>
                 <p className="text-xs text-white/80 mt-1">

@@ -14,10 +14,7 @@ import {
   MapPin,
   CalendarDays,
   Building2,
-  BadgeCheck,
-  Ban,
   Sparkles,
-  Filter,
   Hash,
   IdCard,
   Bell,
@@ -29,68 +26,7 @@ import {
   CalendarCheck,
 } from "lucide-react";
 
-/* ---------------- DEMO DATA ---------------- */
-const employeesSeed = [
-  {
-    id: "EMP-001",
-    name: "Priya Sharma",
-    email: "priya@example.com",
-    phone: "+91 98765 43210",
-    department: "Accounts",
-    designation: "Accountant",
-    status: "Active",
-    joinedOn: "2024-06-10",
-    location: "Chennai, TN",
-    gender: "Female",
-  },
-  {
-    id: "EMP-002",
-    name: "Kavin Raj",
-    email: "kavin@example.com",
-    phone: "+91 91234 56789",
-    department: "Sales",
-    designation: "Sales Executive",
-    status: "Active",
-    joinedOn: "2024-09-01",
-    location: "Jaffna",
-    gender: "Male",
-  },
-  {
-    id: "EMP-003",
-    name: "Nila Devi",
-    email: "nila@example.com",
-    phone: "+94 77 123 4567",
-    department: "HR",
-    designation: "HR Assistant",
-    status: "Inactive",
-    joinedOn: "2023-12-20",
-    location: "Kilinochchi",
-    gender: "Female",
-  },
-];
-
-const adminsSeed = [
-  {
-    id: "ADM-001",
-    name: "Admin User",
-    email: "admin@example.com",
-    phone: "+94 77 987 6543",
-    role: "Super Admin",
-    status: "Active",
-    joinedOn: "2023-01-12",
-    location: "Kilinochchi",
-  },
-  {
-    id: "ADM-002",
-    name: "Ajith Kumar",
-    email: "ajith@example.com",
-    phone: "+91 90000 11111",
-    role: "Admin",
-    status: "Active",
-    joinedOn: "2023-08-06",
-    location: "Chennai, TN",
-  },
-];
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
 /* ---------------- HELPERS ---------------- */
 function initials(name = "") {
@@ -107,6 +43,31 @@ function clamp(n, min, max) {
 }
 function formatDate(iso) {
   return iso || "-";
+}
+
+const EMP_TABLE = "hrmss_employees";
+const EMP_PROFILE_TABLE = "hrmss_employee_profiles";
+const ADMIN_PROFILE_TABLE = "hrmss_profiles";
+const LEAVE_TABLE = "hrmss_leave_requests";
+const ATT_TABLE = "employee_attendance";
+const NOTIF_TABLE = "employee_notifications";
+
+function calcLeaveDays(from, to) {
+  if (!from || !to) return 1;
+  const f = new Date(from);
+  const t = new Date(to);
+  if (Number.isNaN(f.getTime()) || Number.isNaN(t.getTime())) return 1;
+  const diff = Math.round((t - f) / 86400000) + 1;
+  return diff > 0 ? diff : 1;
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "-";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
 }
 function deptBadge(dept = "Unknown") {
   const key = safeLower(dept);
@@ -132,14 +93,6 @@ const typePill = (type) => {
     return `${pillBase} bg-emerald-50 text-emerald-700 border-emerald-200`;
   return `${pillBase} bg-violet-50 text-violet-700 border-violet-200`;
 };
-
-const statusPill = (status) => {
-  if (status === "Active")
-    return `${pillBase} bg-sky-50 text-sky-700 border-sky-200`;
-  return `${pillBase} bg-rose-50 text-rose-700 border-rose-200`;
-};
-
-const dotClass = (status) => (status === "Active" ? "bg-sky-500" : "bg-rose-500");
 
 const TAB_VALUES = new Set(["all", "admins", "employees"]);
 
@@ -236,86 +189,6 @@ function SmallModal({ open, title, subtitle, children, accent = "indigo", onClos
   );
 }
 
-/* ---------------- DEMO: Leave / Attendance / Notifications ---------------- */
-function makeDemoLeave(userId) {
-  const isEmp = userId.startsWith("EMP");
-  return [
-    {
-      id: `${isEmp ? "LR" : "AR"}-${userId}-01`,
-      type: isEmp ? "Casual Leave" : "Permission",
-      from: "2025-12-14",
-      to: "2025-12-15",
-      days: 2,
-      status: "Pending",
-      appliedAt: "2025-12-12",
-      reason: isEmp ? "Family function" : "Admin onsite visit",
-    },
-    {
-      id: `${isEmp ? "LR" : "AR"}-${userId}-02`,
-      type: isEmp ? "Sick Leave" : "Work From Home",
-      from: "2025-12-03",
-      to: "2025-12-03",
-      days: 1,
-      status: "Approved",
-      appliedAt: "2025-12-02",
-      reason: isEmp ? "Fever" : "Server maintenance follow-up",
-    },
-  ];
-}
-
-function makeDemoAttendance(userId) {
-  const base = userId.startsWith("EMP") ? 18 : 20;
-  const present = userId.endsWith("3") ? base - 7 : base - 2;
-  const absent = base - present;
-  return {
-    month: "December 2025",
-    workingDays: base,
-    presentDays: present,
-    absentDays: absent,
-    lateMarks: userId.endsWith("2") ? 2 : 1,
-    logs: [
-      { date: "2025-12-16", in: "09:12", out: "18:05", hours: "8h 53m", status: "Present" },
-      { date: "2025-12-15", in: "09:05", out: "18:02", hours: "8h 57m", status: "Present" },
-      { date: "2025-12-14", in: "-", out: "-", hours: "-", status: userId.endsWith("3") ? "Absent" : "Weekend" },
-    ],
-  };
-}
-
-function makeDemoNotifs(userId) {
-  const tone = [
-    { type: "success", icon: CheckCircle2 },
-    { type: "warning", icon: AlertTriangle },
-    { type: "info", icon: Info },
-  ];
-  const pick = (i) => tone[i % tone.length];
-  return [
-    {
-      id: `NT-${userId}-01`,
-      at: "2025-12-17 10:30",
-      title: "Policy update",
-      message: "Leave policy updated. Please review the changes.",
-      ...pick(2),
-      read: false,
-    },
-    {
-      id: `NT-${userId}-02`,
-      at: "2025-12-15 09:10",
-      title: "Attendance reminder",
-      message: "Don’t forget to check-in on time.",
-      ...pick(1),
-      read: true,
-    },
-    {
-      id: `NT-${userId}-03`,
-      at: "2025-12-12 16:40",
-      title: "Request status",
-      message: "Your latest request has been processed.",
-      ...pick(0),
-      read: true,
-    },
-  ];
-}
-
 /* ---------------- SMALL UI: Modal Tabs ---------------- */
 const ModalTabBtn = ({ active, onClick, icon: Icon, label }) => (
   <button
@@ -345,28 +218,145 @@ export default function HrHome() {
   const tabParam = (searchParams.get("tab") || "").toLowerCase();
   const initialTab = TAB_VALUES.has(tabParam) ? tabParam : "all";
   const [tab, setTab] = useState(initialTab);
-  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
 
+  const [employees, setEmployees] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
   const [viewing, setViewing] = useState(null);
   const [modalTab, setModalTab] = useState("personal");
+  const [leaveData, setLeaveData] = useState([]);
+  const [attendanceData, setAttendanceData] = useState(null);
+  const [notifData, setNotifData] = useState([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
 
-  const combined = useMemo(() => {
-    const employees = employeesSeed.map((e) => ({ type: "employee", ...e }));
-    const admins = adminsSeed.map((a) => ({ type: "admin", ...a }));
-    return [...employees, ...admins];
-  }, []);
+  const combined = useMemo(
+    () => [...employees, ...admins],
+    [employees, admins]
+  );
 
   const counts = useMemo(() => {
-    const emp = employeesSeed.length;
-    const adm = adminsSeed.length;
+    const emp = employees.length;
+    const adm = admins.length;
     const total = emp + adm;
-    const active = combined.filter((x) => x.status === "Active").length;
-    const inactive = total - active;
-    return { emp, adm, total, active, inactive };
-  }, [combined]);
+    return { emp, adm, total };
+  }, [employees, admins]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchUsers = async () => {
+      if (!isSupabaseConfigured) {
+        if (mounted) {
+          setEmployees([]);
+          setAdmins([]);
+          setLoadingUsers(false);
+          setLoadError("Supabase not configured.");
+        }
+        return;
+      }
+
+      try {
+        setLoadingUsers(true);
+        setLoadError("");
+
+        const [empRes, profileRes, adminRes] = await Promise.all([
+          supabase
+            .from(EMP_TABLE)
+            .select(
+              "employee_id, full_name, email, phone, department, role, join_date, location, gender"
+            )
+            .order("employee_id", { ascending: true }),
+          supabase
+            .from(EMP_PROFILE_TABLE)
+            .select(
+              "employee_id, full_name, personal_email, official_email, mobile_number, location, gender"
+            )
+            .eq("profile_completed", true),
+          supabase
+            .from(ADMIN_PROFILE_TABLE)
+            .select(
+              "user_id, employee_id, full_name, personal_email, official_email, mobile_number, department, designation, role, location, created_at"
+            )
+            .in("role", ["admin", "hr"]),
+        ]);
+
+        if (empRes.error) throw empRes.error;
+
+        const profileMap = new Map(
+          (profileRes.data || [])
+            .filter((p) => p?.employee_id)
+            .map((p) => [String(p.employee_id), p])
+        );
+
+        const mappedEmployees = (empRes.data || [])
+          .map((row) => {
+            const key = String(row.employee_id || "");
+            const profile = profileMap.get(key);
+            return {
+              type: "employee",
+              id: key,
+              name: row.full_name || profile?.full_name || "",
+              email:
+                row.email ||
+                profile?.official_email ||
+                profile?.personal_email ||
+                "",
+              phone: row.phone || profile?.mobile_number || "",
+              department: row.department || "",
+              designation: row.role || "Employee",
+              joinedOn: row.join_date || "",
+              location: row.location || profile?.location || "",
+              gender: row.gender || profile?.gender || "",
+            };
+          })
+          .filter((row) => row.id);
+
+        const mappedAdmins = adminRes.error
+          ? []
+          : (adminRes.data || [])
+              .map((row) => ({
+                type: "admin",
+                id: row.employee_id || row.user_id || "",
+                userId: row.user_id || "",
+                name: row.full_name || "",
+                email: row.official_email || row.personal_email || "",
+                phone: row.mobile_number || "",
+                role: row.designation || row.role || "Admin",
+                department: row.department || "",
+                joinedOn: row.created_at || "",
+                location: row.location || "",
+              }))
+              .filter((row) => row.id);
+
+        if (!mounted) return;
+        setEmployees(mappedEmployees);
+        setAdmins(mappedAdmins);
+
+        if (adminRes.error) {
+          console.warn("Admin fetch failed:", adminRes.error.message);
+        }
+      } catch (fetchError) {
+        if (!mounted) return;
+        setEmployees([]);
+        setAdmins([]);
+        setLoadError(fetchError?.message || "Failed to load users.");
+      } finally {
+        if (mounted) setLoadingUsers(false);
+      }
+    };
+
+    fetchUsers();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     let list = [...combined];
@@ -374,12 +364,13 @@ export default function HrHome() {
     if (tab === "employees") list = list.filter((x) => x.type === "employee");
     if (tab === "admins") list = list.filter((x) => x.type === "admin");
 
-    if (statusFilter !== "all") list = list.filter((x) => x.status === statusFilter);
-
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((x) => {
-        const roleOrDept = x.type === "employee" ? `${x.department} ${x.designation}` : x.role;
+        const roleOrDept =
+          x.type === "employee"
+            ? `${x.department} ${x.designation}`
+            : `${x.role || ""} ${x.department || ""}`;
         return (
           safeLower(x.id).includes(q) ||
           safeLower(x.name).includes(q) ||
@@ -397,8 +388,6 @@ export default function HrHome() {
           return x.id || "";
         case "type":
           return x.type || "";
-        case "status":
-          return x.status || "";
         case "joinedOn":
           return x.joinedOn || "";
         case "name":
@@ -416,7 +405,7 @@ export default function HrHome() {
     });
 
     return list;
-  }, [combined, tab, statusFilter, search, sortKey, sortDir]);
+  }, [combined, tab, search, sortKey, sortDir]);
 
   const toggleSort = (key) => {
     if (sortKey !== key) {
@@ -438,9 +427,128 @@ export default function HrHome() {
     return `Searching: "${search.trim()}"`;
   }, [search]);
 
-  const leaveData = useMemo(() => (viewing ? makeDemoLeave(viewing.id) : []), [viewing]);
-  const attendanceData = useMemo(() => (viewing ? makeDemoAttendance(viewing.id) : null), [viewing]);
-  const notifData = useMemo(() => (viewing ? makeDemoNotifs(viewing.id) : []), [viewing]);
+  useEffect(() => {
+    let mounted = true;
+
+    const loadDetails = async () => {
+      if (!viewing || !isSupabaseConfigured) {
+        if (mounted) {
+          setLeaveData([]);
+          setAttendanceData(null);
+          setNotifData([]);
+          setDetailError("");
+          setDetailLoading(false);
+        }
+        return;
+      }
+
+      try {
+        setDetailLoading(true);
+        setDetailError("");
+
+        const ownerRole = viewing.type === "employee" ? "employee" : "admin";
+
+        const [leaveRes, attRes, notifRes] = await Promise.all([
+          supabase
+            .from(LEAVE_TABLE)
+            .select(
+              "id, leave_type, from_date, to_date, status, reason, applied_at"
+            )
+            .eq("owner_role", ownerRole)
+            .eq("owner_id", viewing.id)
+            .order("applied_at", { ascending: false }),
+          viewing.type === "employee"
+            ? supabase
+                .from(ATT_TABLE)
+                .select(
+                  "attendance_date, status, check_in, check_out, total_hours"
+                )
+                .eq("employee_id", viewing.id)
+                .order("attendance_date", { ascending: false })
+                .limit(10)
+            : Promise.resolve({ data: [], error: null }),
+          viewing.userId
+            ? supabase
+                .from(NOTIF_TABLE)
+                .select("id,title,message,type,unread,created_at")
+                .eq("user_id", viewing.userId)
+                .order("created_at", { ascending: false })
+                .limit(20)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+        if (!mounted) return;
+
+        if (leaveRes.error) throw leaveRes.error;
+
+        const mappedLeaves = (leaveRes.data || []).map((row) => {
+          const from = row.from_date ? String(row.from_date) : "";
+          const to = row.to_date ? String(row.to_date) : from;
+          return {
+            id: row.id,
+            type: row.leave_type || "-",
+            from,
+            to,
+            days: calcLeaveDays(from, to),
+            status: row.status || "Pending",
+            reason: row.reason || "-",
+            appliedAt: row.applied_at ? String(row.applied_at).slice(0, 10) : "-",
+          };
+        });
+
+        const attRows = attRes.error ? [] : attRes.data || [];
+        const presentDays = attRows.filter((r) => r.status === "Present").length;
+        const absentDays = attRows.filter((r) => r.status === "Absent").length;
+        const lateMarks = attRows.filter((r) => r.status === "Late").length;
+        const workingDays = attRows.length;
+        const logs = attRows.map((row) => ({
+          date: row.attendance_date || "-",
+          in: row.check_in || "-",
+          out: row.check_out || "-",
+          hours: row.total_hours || "-",
+          status: row.status || "-",
+        }));
+
+        const mappedNotifs = (notifRes.error ? [] : notifRes.data || []).map((row) => ({
+          id: row.id,
+          at: formatDateTime(row.created_at),
+          title: row.title || "-",
+          message: row.message || "",
+          type: row.type || "info",
+          read: !row.unread,
+        }));
+
+        setLeaveData(mappedLeaves);
+        setAttendanceData(
+          viewing.type === "employee" && !attRes.error
+            ? {
+                month: "Recent",
+                workingDays,
+                presentDays,
+                absentDays,
+                lateMarks,
+                logs,
+              }
+            : null
+        );
+        setNotifData(mappedNotifs);
+      } catch (fetchError) {
+        if (!mounted) return;
+        setLeaveData([]);
+        setAttendanceData(null);
+        setNotifData([]);
+        setDetailError(fetchError?.message || "Failed to load details.");
+      } finally {
+        if (mounted) setDetailLoading(false);
+      }
+    };
+
+    loadDetails();
+
+    return () => {
+      mounted = false;
+    };
+  }, [viewing]);
 
   useEffect(() => {
     if (viewing) document.body.style.overflow = "hidden";
@@ -470,14 +578,6 @@ export default function HrHome() {
                   <Hash size={14} className="opacity-80" />
                   Total: {counts.total}
                 </span>
-                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-white/70 text-xs font-semibold text-slate-700">
-                  <span className={`w-2 h-2 rounded-full ${dotClass("Active")}`} />
-                  Active: {counts.active}
-                </span>
-                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border bg-white/70 text-xs font-semibold text-slate-700">
-                  <span className={`w-2 h-2 rounded-full ${dotClass("Inactive")}`} />
-                  Inactive: {counts.inactive}
-                </span>
               </div>
             </div>
 
@@ -502,31 +602,6 @@ export default function HrHome() {
                       <X size={16} className="text-slate-500" />
                     </button>
                   ) : null}
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
-                    <Filter size={14} /> Status:
-                  </span>
-
-                  {["all", "Active", "Inactive"].map((s) => {
-                    const active = statusFilter === s;
-                    const label = s === "all" ? "All" : s;
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setStatusFilter(s)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
-                          active
-                            ? "bg-slate-900 text-white border-slate-900"
-                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
                 </div>
 
                 <div className="mt-2 text-[11px] text-slate-500">{searchHint}</div>
@@ -575,12 +650,6 @@ export default function HrHome() {
                 <th className="text-left px-4 py-3 font-semibold">Contact</th>
                 <th className="text-left px-4 py-3 font-semibold">Role / Dept</th>
 
-                <th className="text-left px-4 py-3 font-semibold">
-                  <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-2 hover:text-slate-900">
-                    Status <SortIcon active={sortKey === "status"} dir={sortDir} />
-                  </button>
-                </th>
-
                 <th className="text-right px-4 py-3 font-semibold">
                   <button type="button" onClick={() => toggleSort("joinedOn")} className="inline-flex items-center gap-2 hover:text-slate-900">
                     Joined <SortIcon active={sortKey === "joinedOn"} dir={sortDir} />
@@ -590,9 +659,21 @@ export default function HrHome() {
             </thead>
 
             <tbody className="divide-y">
-              {filtered.length === 0 ? (
+              {loadingUsers ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                    Loading users...
+                  </td>
+                </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-rose-600">
+                    {loadError}
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
                     No users found.
                   </td>
                 </tr>
@@ -616,9 +697,6 @@ export default function HrHome() {
                           <div className="relative h-full w-full flex items-center justify-center">
                             <span className="text-xs font-extrabold text-slate-800">{initials(u.name)}</span>
                           </div>
-                          <span
-                            className={`absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${dotClass(u.status)}`}
-                          />
                         </div>
 
                         <div className="min-w-0">
@@ -669,21 +747,6 @@ export default function HrHome() {
                       </div>
                     </td>
 
-                    <td className="px-4 py-3">
-                      <span className={statusPill(u.status)}>
-                        <span className={`w-2 h-2 rounded-full ${dotClass(u.status)}`} />
-                        {u.status === "Active" ? (
-                          <>
-                            <BadgeCheck size={14} /> Active
-                          </>
-                        ) : (
-                          <>
-                            <Ban size={14} /> Inactive
-                          </>
-                        )}
-                      </span>
-                    </td>
-
                     <td className="px-4 py-3 text-right text-slate-700 font-semibold">{formatDate(u.joinedOn)}</td>
                   </tr>
                 ))
@@ -728,11 +791,6 @@ export default function HrHome() {
                 )}
               </span>
 
-              <span className={statusPill(viewing.status)}>
-                <span className={`w-2 h-2 rounded-full ${dotClass(viewing.status)}`} />
-                {viewing.status}
-              </span>
-
               {viewing.type === "employee" ? <span className={deptBadge(viewing.department)}>{viewing.department}</span> : null}
             </div>
 
@@ -743,6 +801,12 @@ export default function HrHome() {
               <ModalTabBtn active={modalTab === "attendance"} onClick={() => setModalTab("attendance")} icon={CalendarCheck} label="Attendance" />
               <ModalTabBtn active={modalTab === "notifications"} onClick={() => setModalTab("notifications")} icon={Bell} label="Notifications" />
             </div>
+
+            {detailError ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                {detailError}
+              </div>
+            ) : null}
 
             {/* PERSONAL */}
             {modalTab === "personal" ? (
@@ -853,29 +917,37 @@ export default function HrHome() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {leaveData.map((lr) => (
-                        <tr key={lr.id} className="hover:bg-slate-50/60 transition">
-                          <td className="px-4 py-3">
-                            <div className="font-semibold text-slate-900">{lr.type}</div>
-                            <div className="text-xs text-slate-500 truncate">{lr.reason}</div>
-                            <div className="mt-1 text-[11px] text-slate-500">{lr.id}</div>
+                      {detailLoading ? (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                            Loading leave requests...
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="text-slate-900 font-semibold">
-                              {lr.from} → {lr.to}
-                            </div>
-                            <div className="text-xs text-slate-500">{lr.days} day(s)</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${tonePill(lr.status)}`}>
-                              <Clock3 size={14} className="opacity-80" />
-                              {lr.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-700 font-semibold">{lr.appliedAt}</td>
                         </tr>
-                      ))}
-                      {leaveData.length === 0 ? (
+                      ) : (
+                        leaveData.map((lr) => (
+                          <tr key={lr.id} className="hover:bg-slate-50/60 transition">
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-slate-900">{lr.type}</div>
+                              <div className="text-xs text-slate-500 truncate">{lr.reason}</div>
+                              <div className="mt-1 text-[11px] text-slate-500">{lr.id}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="text-slate-900 font-semibold">
+                                {lr.from} - {lr.to}
+                              </div>
+                              <div className="text-xs text-slate-500">{lr.days} day(s)</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${tonePill(lr.status)}`}>
+                                <Clock3 size={14} className="opacity-80" />
+                                {lr.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-slate-700 font-semibold">{lr.appliedAt}</td>
+                          </tr>
+                        ))
+                      )}
+                      {!detailLoading && leaveData.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
                             No leave requests.
@@ -891,95 +963,105 @@ export default function HrHome() {
             {/* ATTENDANCE */}
             {modalTab === "attendance" ? (
               <div className="space-y-3">
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-extrabold text-slate-900">Attendance</div>
-                      <div className="text-xs text-slate-500">{attendanceData?.month}</div>
-                    </div>
-                    <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
-                      <CalendarDays size={14} />
-                      Working Days: {attendanceData?.workingDays ?? 0}
-                    </span>
+                {detailLoading ? (
+                  <div className="rounded-2xl border bg-white p-4 text-sm text-slate-500">
+                    Loading attendance...
                   </div>
-
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="rounded-2xl border bg-slate-50 p-3">
-                      <div className="text-xs text-slate-500">Present</div>
-                      <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.presentDays ?? 0}</div>
-                    </div>
-                    <div className="rounded-2xl border bg-slate-50 p-3">
-                      <div className="text-xs text-slate-500">Absent</div>
-                      <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.absentDays ?? 0}</div>
-                    </div>
-                    <div className="rounded-2xl border bg-slate-50 p-3">
-                      <div className="text-xs text-slate-500">Late Marks</div>
-                      <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.lateMarks ?? 0}</div>
-                    </div>
+                ) : !attendanceData ? (
+                  <div className="rounded-2xl border bg-white p-4 text-sm text-slate-500">
+                    No attendance data.
                   </div>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-extrabold text-slate-900">Attendance</div>
+                          <div className="text-xs text-slate-500">{attendanceData?.month}</div>
+                        </div>
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <CalendarDays size={14} />
+                          Working Days: {attendanceData?.workingDays ?? 0}
+                        </span>
+                      </div>
 
-                  {attendanceData ? (
-                    <div className="mt-4">
-                      <div className="text-xs font-semibold text-slate-600 mb-2">Present Rate</div>
-                      <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-amber-500"
-                          style={{
-                            width: `${clamp(
-                              Math.round((attendanceData.presentDays / attendanceData.workingDays) * 100),
-                              0,
-                              100
-                            )}%`,
-                          }}
-                        />
+                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="rounded-2xl border bg-slate-50 p-3">
+                          <div className="text-xs text-slate-500">Present</div>
+                          <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.presentDays ?? 0}</div>
+                        </div>
+                        <div className="rounded-2xl border bg-slate-50 p-3">
+                          <div className="text-xs text-slate-500">Absent</div>
+                          <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.absentDays ?? 0}</div>
+                        </div>
+                        <div className="rounded-2xl border bg-slate-50 p-3">
+                          <div className="text-xs text-slate-500">Late Marks</div>
+                          <div className="mt-1 text-xl font-extrabold text-slate-900">{attendanceData?.lateMarks ?? 0}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="text-xs font-semibold text-slate-600 mb-2">Present Rate</div>
+                        <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-amber-500"
+                            style={{
+                              width: `${clamp(
+                                Math.round((attendanceData.presentDays / attendanceData.workingDays) * 100),
+                                0,
+                                100
+                              )}%`,
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
-                  ) : null}
-                </div>
 
-                <div className="rounded-2xl border bg-white overflow-hidden">
-                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-                    <div className="text-sm font-extrabold text-slate-900">Recent Logs</div>
-                    <div className="text-xs text-slate-500">{attendanceData?.logs?.length ?? 0} rows</div>
-                  </div>
+                    <div className="rounded-2xl border bg-white overflow-hidden">
+                      <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                        <div className="text-sm font-extrabold text-slate-900">Recent Logs</div>
+                        <div className="text-xs text-slate-500">{attendanceData?.logs?.length ?? 0} rows</div>
+                      </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="border-b text-slate-600">
-                          <th className="text-left px-4 py-3 font-semibold">Date</th>
-                          <th className="text-left px-4 py-3 font-semibold">In</th>
-                          <th className="text-left px-4 py-3 font-semibold">Out</th>
-                          <th className="text-left px-4 py-3 font-semibold">Hours</th>
-                          <th className="text-right px-4 py-3 font-semibold">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {attendanceData?.logs?.map((l, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/60 transition">
-                            <td className="px-4 py-3 font-semibold text-slate-900">{l.date}</td>
-                            <td className="px-4 py-3 text-slate-700">{l.in}</td>
-                            <td className="px-4 py-3 text-slate-700">{l.out}</td>
-                            <td className="px-4 py-3 text-slate-700">{l.hours}</td>
-                            <td className="px-4 py-3 text-right">
-                              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border bg-slate-50 text-slate-700 border-slate-200">
-                                <Clock3 size={14} className="opacity-80" />
-                                {l.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                        {!attendanceData?.logs?.length ? (
-                          <tr>
-                            <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                              No logs.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="border-b text-slate-600">
+                              <th className="text-left px-4 py-3 font-semibold">Date</th>
+                              <th className="text-left px-4 py-3 font-semibold">In</th>
+                              <th className="text-left px-4 py-3 font-semibold">Out</th>
+                              <th className="text-left px-4 py-3 font-semibold">Hours</th>
+                              <th className="text-right px-4 py-3 font-semibold">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {attendanceData?.logs?.map((l, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50/60 transition">
+                                <td className="px-4 py-3 font-semibold text-slate-900">{l.date}</td>
+                                <td className="px-4 py-3 text-slate-700">{l.in}</td>
+                                <td className="px-4 py-3 text-slate-700">{l.out}</td>
+                                <td className="px-4 py-3 text-slate-700">{l.hours}</td>
+                                <td className="px-4 py-3 text-right">
+                                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border bg-slate-50 text-slate-700 border-slate-200">
+                                    <Clock3 size={14} className="opacity-80" />
+                                    {l.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                            {!attendanceData?.logs?.length ? (
+                              <tr>
+                                <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                                  No logs.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             ) : null}
 
@@ -992,8 +1074,16 @@ export default function HrHome() {
                 </div>
 
                 <div className="p-4 space-y-3">
-                  {notifData.map((n) => {
-                    const Icon = n.icon || Bell;
+                  {detailLoading ? (
+                    <div className="text-sm text-slate-500 text-center py-6">Loading notifications...</div>
+                  ) : (
+                    notifData.map((n) => {
+                      const Icon =
+                        n.type === "success"
+                          ? CheckCircle2
+                          : n.type === "warning"
+                          ? AlertTriangle
+                          : Info;
                     const toneCls =
                       n.type === "success"
                         ? "bg-emerald-50 border-emerald-200 text-emerald-800"
@@ -1028,9 +1118,10 @@ export default function HrHome() {
                         </div>
                       </div>
                     );
-                  })}
+                  })
+                  )}
 
-                  {notifData.length === 0 ? (
+                  {!detailLoading && notifData.length === 0 ? (
                     <div className="text-sm text-slate-500 text-center py-6">No notifications.</div>
                   ) : null}
                 </div>

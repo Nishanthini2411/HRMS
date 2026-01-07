@@ -1,5 +1,5 @@
 // src/pages/admin/AdminNotifications.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -13,9 +13,13 @@ import {
   ShieldCheck,
   Clock3,
   MailOpen,
+  RefreshCw,
 } from "lucide-react";
+import { supabase } from "../../lib/supabaseClient"; // ✅ adjust path if different
 
 /* ===================== CONFIG ===================== */
+const TABLE = "hrmss_notifications";
+
 const ALLOWED_SOURCES = [
   "Employees",
   "Attendance",
@@ -66,72 +70,6 @@ const typeIcon = {
   info: Info,
 };
 
-const seed = [
-  {
-    id: "NTF-1001",
-    title: "New employee added",
-    detail: "EMP-014 (Anita) added to Engineering department.",
-    type: "info",
-    time: "Just now",
-    source: "Employees",
-    unread: true,
-  },
-  {
-    id: "NTF-1002",
-    title: "Attendance correction request",
-    detail: "EMP-002 requested correction for 2025-12-16 (Missing punch).",
-    type: "warning",
-    time: "15m ago",
-    source: "Attendance",
-    unread: true,
-  },
-  {
-    id: "NTF-1003",
-    title: "Leave request approved",
-    detail: "EMP-001 leave approved for 2025-12-18 to 2025-12-19.",
-    type: "success",
-    time: "Today, 10:00 AM",
-    source: "LeaveManagement",
-    unread: false,
-  },
-  {
-    id: "NTF-1004",
-    title: "Payroll batch completed",
-    detail: "December salaries processed successfully.",
-    type: "success",
-    time: "Today, 9:05 AM",
-    source: "Payroll",
-    unread: true,
-  },
-  {
-    id: "NTF-1005",
-    title: "Document expiry alert",
-    detail: "EMP-006 ID proof expires in 7 days. Please update.",
-    type: "warning",
-    time: "Yesterday",
-    source: "Documents",
-    unread: false,
-  },
-  {
-    id: "NTF-1006",
-    title: "Profile update pending",
-    detail: "EMP-003 updated bank details — review required.",
-    type: "info",
-    time: "Yesterday",
-    source: "My Profile",
-    unread: true,
-  },
-  {
-    id: "NTF-1007",
-    title: "Upcoming birthday",
-    detail: "Kavin Raj’s birthday is in 3 days — schedule announcement.",
-    type: "info",
-    time: "2d ago",
-    source: "Birthday",
-    unread: false,
-  },
-];
-
 /* ===================== HELPERS ===================== */
 function cn(...a) {
   return a.filter(Boolean).join(" ");
@@ -165,7 +103,6 @@ function EmptyState() {
   );
 }
 
-/** ✅ Stat cards unchanged (original) */
 function StatCard({ icon: Icon, label, value, active, onClick }) {
   return (
     <button
@@ -195,15 +132,7 @@ function StatCard({ icon: Icon, label, value, active, onClick }) {
   );
 }
 
-/* ===================== ROW (original) ===================== */
-function NotificationRow({
-  n,
-  selected,
-  onToggleSelect,
-  onMarkRead,
-  onDelete,
-  onGoToSource,
-}) {
+function NotificationRow({ n, selected, onToggleSelect, onMarkRead, onDelete, onGoToSource }) {
   const Icon = typeIcon[n.type] ?? Info;
   const t = tone[n.type] ?? tone.info;
 
@@ -236,7 +165,7 @@ function NotificationRow({
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={cn("text-[11px] font-semibold rounded-full px-3 py-1 ring-1", t.pill)}>
-                  {n.type.toUpperCase()}
+                  {String(n.type || "info").toUpperCase()}
                 </span>
 
                 <span className="text-[11px] text-slate-500 rounded-full border px-2.5 py-1">
@@ -254,7 +183,7 @@ function NotificationRow({
               </div>
 
               <p className="mt-2 text-sm font-bold text-slate-900">{n.title}</p>
-              <p className="mt-1 text-sm text-slate-600">{n.detail}</p>
+              {n.detail ? <p className="mt-1 text-sm text-slate-600">{n.detail}</p> : null}
 
               <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
                 <ShieldCheck size={14} />
@@ -262,7 +191,7 @@ function NotificationRow({
                 <span className="mx-1 text-slate-300">•</span>
                 <span className="inline-flex items-center gap-1">
                   <Clock3 size={12} />
-                  {n.time}
+                  {n.timeLabel || n.created_at}
                 </span>
               </div>
             </div>
@@ -308,31 +237,54 @@ function NotificationRow({
 export default function AdminNotifications() {
   const navigate = useNavigate();
 
-  const initial = useMemo(() => seed.filter((x) => ALLOWED_SOURCES.includes(x.source)), []);
-  const [items, setItems] = useState(initial);
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState([]);
 
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
   const [source, setSource] = useState("All");
   const [status, setStatus] = useState("All");
-
   const [selected, setSelected] = useState(() => new Set());
+
+  // ✅ fetch notifications
+  const fetchNotifications = async () => {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("id,title,detail,type,source,route,unread,created_at")
+      .in("source", ALLOWED_SOURCES)
+      .in("audience", ["admin", "all"]) // show admin/all
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Notifications fetch error:", error);
+      setItems([]);
+    } else {
+      setItems(data || []);
+    }
+
+    setSelected(new Set());
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
+
     return items
       .filter((n) => ALLOWED_SOURCES.includes(n.source))
       .filter((n) => {
         const typeOk = type === "All" ? true : n.type === type;
         const sourceOk = source === "All" ? true : n.source === source;
         const statusOk =
-          status === "All"
-            ? true
-            : status === "Unread"
-            ? n.unread === true
-            : n.unread === false;
+          status === "All" ? true : status === "Unread" ? n.unread === true : n.unread === false;
 
-        const text = `${n.title} ${n.detail} ${n.source} ${n.time}`.toLowerCase();
+        const text = `${n.title || ""} ${n.detail || ""} ${n.source || ""} ${n.created_at || ""}`.toLowerCase();
         const qOk = !query ? true : text.includes(query);
 
         return typeOk && sourceOk && statusOk && qOk;
@@ -361,10 +313,17 @@ export default function AdminNotifications() {
   };
 
   const clearSelection = () => setSelected(new Set());
-  const selectAllFiltered = () => setSelected(() => new Set(filtered.map((x) => x.id)));
 
-  const markRead = (ids) => {
+  // ✅ mark read in DB + local
+  const markRead = async (ids) => {
     if (!ids?.length) return;
+
+    const { error } = await supabase.from(TABLE).update({ unread: false }).in("id", ids);
+    if (error) {
+      console.error("Mark read error:", error);
+      return;
+    }
+
     setItems((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, unread: false } : x)));
     setSelected((prev) => {
       const next = new Set(prev);
@@ -373,8 +332,16 @@ export default function AdminNotifications() {
     });
   };
 
-  const remove = (ids) => {
+  // ✅ delete in DB + local
+  const remove = async (ids) => {
     if (!ids?.length) return;
+
+    const { error } = await supabase.from(TABLE).delete().in("id", ids);
+    if (error) {
+      console.error("Delete error:", error);
+      return;
+    }
+
     setItems((prev) => prev.filter((x) => !ids.includes(x.id)));
     setSelected((prev) => {
       const next = new Set(prev);
@@ -390,8 +357,8 @@ export default function AdminNotifications() {
 
   return (
     <div className="space-y-6">
-      {/* ✅ HEADER BIG CARD color changed to image color */}
- <div className="rounded-3xl border bg-[#464975] text-white p-6 shadow-sm relative overflow-hidden">        {/* subtle glow like your sample */}
+      {/* HEADER */}
+      <div className="rounded-3xl border bg-[#464975] text-white p-6 shadow-sm relative overflow-hidden">
         <div className="absolute -top-16 -left-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-20 -right-20 h-72 w-72 rounded-full bg-white/10 blur-2xl" />
 
@@ -403,17 +370,19 @@ export default function AdminNotifications() {
               Shows only: Employees, Attendance, LeaveManagement, Payroll, Documents, My Profile, Birthday.
             </p>
           </div>
+
+          <button
+            onClick={fetchNotifications}
+            className="self-start lg:self-end inline-flex items-center gap-2 text-xs font-semibold rounded-full border border-white/25 bg-white/10 px-4 py-2 hover:bg-white/15"
+            title="Refresh"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
         </div>
 
-        {/* ✅ 3 stat cards unchanged */}
         <div className="relative mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <StatCard
-            icon={Bell}
-            label="Total"
-            value={counts.total}
-            active={status === "All"}
-            onClick={() => setStatus("All")}
-          />
+          <StatCard icon={Bell} label="Total" value={counts.total} active={status === "All"} onClick={() => setStatus("All")} />
           <StatCard
             icon={AlertTriangle}
             label="Unread"
@@ -421,13 +390,7 @@ export default function AdminNotifications() {
             active={status === "Unread"}
             onClick={() => setStatus("Unread")}
           />
-          <StatCard
-            icon={ShieldCheck}
-            label="Read"
-            value={counts.read}
-            active={status === "Read"}
-            onClick={() => setStatus("Read")}
-          />
+          <StatCard icon={ShieldCheck} label="Read" value={counts.read} active={status === "Read"} onClick={() => setStatus("Read")} />
         </div>
       </div>
 
@@ -487,15 +450,10 @@ export default function AdminNotifications() {
               >
                 Select all (filtered)
               </button>
-              <button
-                onClick={clearSelection}
-                className="text-xs font-semibold rounded-full border px-3 py-1.5 hover:bg-slate-50"
-              >
+              <button onClick={clearSelection} className="text-xs font-semibold rounded-full border px-3 py-1.5 hover:bg-slate-50">
                 Clear
               </button>
-              {selectedCount > 0 ? (
-                <span className="text-xs text-slate-500">{selectedCount} selected</span>
-              ) : null}
+              {selectedCount > 0 ? <span className="text-xs text-slate-500">{selectedCount} selected</span> : null}
             </div>
 
             <div className="flex items-center gap-2">
@@ -504,9 +462,7 @@ export default function AdminNotifications() {
                 onClick={() => markRead([...selected])}
                 className={cn(
                   "text-xs font-semibold rounded-full border px-3 py-1.5",
-                  selectedCount === 0
-                    ? "text-slate-400 bg-slate-50 cursor-not-allowed"
-                    : "hover:bg-slate-50"
+                  selectedCount === 0 ? "text-slate-400 bg-slate-50 cursor-not-allowed" : "hover:bg-slate-50"
                 )}
               >
                 Mark read
@@ -528,7 +484,9 @@ export default function AdminNotifications() {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="rounded-3xl border bg-white p-8 text-sm text-slate-600 shadow-sm">Loading notifications...</div>
+        ) : filtered.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="space-y-3">

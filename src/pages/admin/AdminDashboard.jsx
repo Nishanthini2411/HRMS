@@ -249,7 +249,7 @@ const AdminDashboard = () => {
   const quickActions = [
     { label: "Add Employee", description: "Create a new employee record", path: "/dashboard/employees" },
     { label: "Approve Leaves", description: "Review pending leave requests", path: "/dashboard/leave" },
-    { label: "Generate Payroll", description: "Run monthly payroll", path: "/dashboard/payroll" },
+    // { label: "Generate Payroll", description: "Run monthly payroll", path: "/dashboard/payroll" },
     { label: "View Attendance", description: "Check daily attendance report", path: "/dashboard/attendance" },
   ];
 

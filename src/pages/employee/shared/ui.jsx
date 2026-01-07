@@ -34,9 +34,37 @@ export function Badge({ tone = "neutral", children }) {
 /* =========================
    SECTION CARD
 ========================= */
-export function SectionCard({ title, subtitle, action, children }) {
+export function SectionCard({
+  title,
+  subtitle,
+  action,
+  children,
+  className = "",
+  onClick,
+}) {
+  const isClickable = typeof onClick === "function";
+
+  const handleKeyDown = (event) => {
+    if (!isClickable) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onClick(event);
+    }
+  };
+
   return (
-    <div className="rounded-3xl border bg-white p-6 shadow-sm">
+    <div
+      className={cn(
+        "rounded-3xl border bg-white p-6 shadow-sm",
+        isClickable &&
+          "cursor-pointer transition hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-200",
+        className
+      )}
+      onClick={onClick}
+      onKeyDown={isClickable ? handleKeyDown : undefined}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-base font-extrabold text-slate-900">{title}</h3>
