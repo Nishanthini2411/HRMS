@@ -11,7 +11,6 @@ import {
   ListChecks,
   MoreHorizontal,
   Percent,
-  Play,
   ReceiptIndianRupee,
   Settings,
   ShieldCheck,
@@ -20,12 +19,14 @@ import {
   Wallet,
   BadgeIndianRupee,
   Banknote,
+  X,
+  Save,
 } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 
 /* ---------------- CONFIG ---------------- */
 const EMP_TABLE = "hrmss_employees";
-const PAYROLL_TABLE = "hrmss_payroll"; // ✅ change if your table name differs
+const PAYROLL_TABLE = "hrmss_payroll";
 const PROFILE_TABLE = "hrmss_profiles"; // optional (bank details)
 const ATT_TABLE = "employee_attendance"; // optional
 const LEAVE_TABLE = "hrmss_leave_requests"; // optional (if exists)
@@ -74,6 +75,19 @@ const maskAccount = (v) => {
   return `XXXX XXXX ${s.slice(-4)}`;
 };
 
+const toNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const splitDeductions = (total) => {
+  const safeTotal = Math.max(toNum(total), 0);
+  const loan = Math.round(safeTotal * 0.5);
+  const salaryAdvance = Math.round(safeTotal * 0.3);
+  const leave = Math.max(safeTotal - loan - salaryAdvance, 0);
+  return { loan, salaryAdvance, leave };
+};
+
 /* ---------------- small UI bits ---------------- */
 function TabButton({ active, icon: Icon, children, onClick }) {
   return (
@@ -108,7 +122,7 @@ function StatusPill({ status }) {
   );
 }
 
-function StatCard({ variant, title, value, sub, icon: Icon }) {
+function StatCard({ variant, title, value, sub, icon: Icon, onClick, active }) {
   const map = {
     white: "bg-white border-slate-200",
     navy: "bg-[#1C2648] border-[#1C2648] text-white",
@@ -125,9 +139,20 @@ function StatCard({ variant, title, value, sub, icon: Icon }) {
 
   const titleCls = variant === "navy" || variant === "green" ? "text-white/80" : "text-slate-500";
   const subCls = variant === "navy" || variant === "green" ? "text-white/70" : "text-slate-500";
+  const isClickable = Boolean(onClick);
+  const Wrapper = isClickable ? "button" : "div";
 
   return (
-    <div className={`rounded-xl border p-4 ${map[variant]}`}>
+    <Wrapper
+      type={isClickable ? "button" : undefined}
+      onClick={onClick}
+      className={[
+        "rounded-xl border p-4 text-left transition",
+        map[variant],
+        isClickable ? "hover:-translate-y-0.5 hover:shadow-md" : "",
+        active ? "ring-2 ring-emerald-300" : "",
+      ].join(" ")}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className={`text-xs font-semibold ${titleCls}`}>{title}</p>
@@ -143,13 +168,10 @@ function StatCard({ variant, title, value, sub, icon: Icon }) {
         </div>
 
         <div className={["h-9 w-9 rounded-lg border grid place-items-center shrink-0", iconWrap[variant]].join(" ")}>
-          <Icon
-            size={16}
-            className={variant === "navy" || variant === "green" ? "text-white" : "text-slate-700"}
-          />
+          <Icon size={16} className={variant === "navy" || variant === "green" ? "text-white" : "text-slate-700"} />
         </div>
       </div>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -189,15 +211,39 @@ export default function PayrollPage() {
   const [batchStatus, setBatchStatus] = useState("Draft"); // Draft / Approved / Paid
 
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([]); // ✅ no fake seed
+  const [rows, setRows] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
 
   const [selectedEmpId, setSelectedEmpId] = useState("");
+  const [activeStat, setActiveStat] = useState("");
+  const [activeAction, setActiveAction] = useState("");
+  const [actionEmpId, setActionEmpId] = useState("");
+  const [actionForm, setActionForm] = useState({
+    basic: 0,
+    hra: 0,
+    allowances: 0,
+    deductions: 0,
+  });
+  const [actionSaving, setActionSaving] = useState(false);
+  const [actionSaveErr, setActionSaveErr] = useState("");
 
   // details helpers
   const [bankInfo, setBankInfo] = useState(null);
   const [attSummary, setAttSummary] = useState(null); // { workingDays, presentDays, rate }
   const [leaveSummary, setLeaveSummary] = useState(null); // { paidLeave, lopDays } (optional)
+
+  // ✅ Create/Edit modal state
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [payModalEmpId, setPayModalEmpId] = useState("");
+  const [payFixedEmp, setPayFixedEmp] = useState(false); // if opened from row/details -> fixed employee
+  const [payForm, setPayForm] = useState({
+    basic: 0,
+    hra: 0,
+    allowances: 0,
+    deductions: 0,
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState("");
 
   const periodKey = useMemo(() => monthKey(month, year), [month, year]);
   const periodRange = useMemo(() => monthRange(month, year), [month, year]);
@@ -207,7 +253,6 @@ export default function PayrollPage() {
     setLoading(true);
     setErrorMsg("");
 
-    // 1) employees
     const empRes = await supabase
       .from(EMP_TABLE)
       .select("employee_id, full_name, role, department, status")
@@ -229,7 +274,6 @@ export default function PayrollPage() {
         department: String(e.department || "-"),
       }));
 
-    // 2) payroll for month
     const payRes = await supabase
       .from(PAYROLL_TABLE)
       .select("id, employee_id, month, basic_salary, hra, allowances, deductions, net_salary, created_at")
@@ -243,9 +287,7 @@ export default function PayrollPage() {
     }
 
     const payrollByEmp = new Map();
-    for (const p of payRes.data || []) {
-      payrollByEmp.set(String(p.employee_id), p);
-    }
+    for (const p of payRes.data || []) payrollByEmp.set(String(p.employee_id), p);
 
     const merged = employees.map((e) => {
       const p = payrollByEmp.get(e.empId);
@@ -279,7 +321,6 @@ export default function PayrollPage() {
 
     setRows(merged);
 
-    // select first employee auto
     if (!selectedEmpId && merged.length) {
       setSelectedEmpId(merged[0].empId);
     } else if (selectedEmpId && !merged.some((r) => r.empId === selectedEmpId)) {
@@ -294,6 +335,22 @@ export default function PayrollPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodKey]);
 
+  useEffect(() => {
+    if (!actionEmpId && rows.length) {
+      setActionEmpId(rows[0].empId);
+    } else if (actionEmpId && !rows.some((r) => r.empId === actionEmpId)) {
+      setActionEmpId(rows[0]?.empId || "");
+    }
+  }, [rows, actionEmpId]);
+
+  useEffect(() => {
+    if (activeAction === "create") {
+      setActionForm({ basic: 0, hra: 0, allowances: 0, deductions: 0 });
+      setActionSaveErr("");
+      setActionSaving(false);
+    }
+  }, [actionEmpId, activeAction]);
+
   /* ---------------- FILTERED LIST ---------------- */
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -307,13 +364,35 @@ export default function PayrollPage() {
     );
   }, [rows, query]);
 
-  /* ---------------- HEADER STATS (true from rows) ---------------- */
+  /* ---------------- HEADER STATS ---------------- */
   const headerStats = useMemo(() => {
     const totalEmployees = rows.length;
     const grossTotal = rows.reduce((a, r) => a + Number(r.gross || 0), 0);
     const deductionsTotal = rows.reduce((a, r) => a + Number(r.deductions || 0), 0);
     const netTotal = rows.reduce((a, r) => a + Number(r.net || 0), 0);
     return { totalEmployees, grossTotal, deductionsTotal, netTotal };
+  }, [rows]);
+
+  const headerBreakdown = useMemo(() => {
+    const totalBasic = rows.reduce((a, r) => a + toNum(r.basic), 0);
+    const totalHra = rows.reduce((a, r) => a + toNum(r.hra), 0);
+    const totalAllowances = rows.reduce((a, r) => a + toNum(r.allowances), 0);
+    const grossTotal = totalBasic + totalHra + totalAllowances;
+    const deductionsTotal = rows.reduce((a, r) => a + toNum(r.deductions), 0);
+    const netTotal = rows.reduce((a, r) => a + toNum(r.net), 0);
+    const processed = rows.filter((r) => r.status === "Processed").length;
+    const pending = rows.filter((r) => r.status !== "Processed").length;
+    return {
+      totalBasic,
+      totalHra,
+      totalAllowances,
+      grossTotal,
+      deductionsTotal,
+      netTotal,
+      processed,
+      pending,
+      deductionSplit: splitDeductions(deductionsTotal),
+    };
   }, [rows]);
 
   /* ---------------- CLICK EMPLOYEE -> DETAILS ---------------- */
@@ -323,26 +402,27 @@ export default function PayrollPage() {
   };
 
   const selectedRow = useMemo(() => rows.find((r) => r.empId === selectedEmpId) || null, [rows, selectedEmpId]);
+  const actionRow = useMemo(() => rows.find((r) => r.empId === actionEmpId) || null, [rows, actionEmpId]);
+  const actionGross = useMemo(
+    () => toNum(actionForm.basic) + toNum(actionForm.hra) + toNum(actionForm.allowances),
+    [actionForm]
+  );
+  const actionDeductionSplit = useMemo(() => splitDeductions(actionForm.deductions || 0), [actionForm]);
+  const actionNet = useMemo(() => Math.max(actionGross - toNum(actionForm.deductions), 0), [actionGross, actionForm]);
 
   /* ---------------- DETAILS: bank + attendance + leaves (optional) ---------------- */
   const fetchDetailsForEmployee = async (empId) => {
     if (!empId) return;
 
-    // bank profile (optional)
     const profRes = await supabase
       .from(PROFILE_TABLE)
       .select("employee_id, bank_name, account_number, ifsc_code, branch")
       .eq("employee_id", empId)
       .maybeSingle();
 
-    if (!profRes.error) {
-      setBankInfo(profRes.data || null);
-    } else {
-      // if table not exists / policy -> ignore
-      setBankInfo(null);
-    }
+    if (!profRes.error) setBankInfo(profRes.data || null);
+    else setBankInfo(null);
 
-    // attendance (optional)
     try {
       const { startDate, endDate } = periodRange;
       const attRes = await supabase
@@ -353,20 +433,16 @@ export default function PayrollPage() {
         .lt("attendance_date", endDate);
 
       if (!attRes.error) {
-        const rows = attRes.data || [];
-        const presentDays = rows.filter((x) => x.status === "Present").length;
-        // working days = recorded days (since no holiday table)
-        const workingDays = rows.length || 0;
+        const rr = attRes.data || [];
+        const presentDays = rr.filter((x) => x.status === "Present").length;
+        const workingDays = rr.length || 0;
         const rate = workingDays ? Math.round((presentDays / workingDays) * 100) : 0;
         setAttSummary({ workingDays, presentDays, rate });
-      } else {
-        setAttSummary(null);
-      }
+      } else setAttSummary(null);
     } catch {
       setAttSummary(null);
     }
 
-    // leaves (optional) - best-effort
     try {
       const { startDate, endDate } = periodRange;
 
@@ -380,12 +456,9 @@ export default function PayrollPage() {
         .lt("from_date", endDate);
 
       if (!leaveRes.error) {
-        // simple count (not day calculation)
         const paidLeave = (leaveRes.data || []).length;
         setLeaveSummary({ paidLeave, lopDays: 0 });
-      } else {
-        setLeaveSummary(null);
-      }
+      } else setLeaveSummary(null);
     } catch {
       setLeaveSummary(null);
     }
@@ -397,31 +470,35 @@ export default function PayrollPage() {
   }, [tab, selectedEmpId, periodKey]);
 
   /* ---------------- ACTIONS ---------------- */
+  const openActionDetails = (key) => setActiveAction(key);
   const onApprove = () => setBatchStatus("Approved");
-  const onRunPayroll = () => setBatchStatus("Paid");
 
-  // ✅ Calculate: only recompute net_salary for existing payroll rows (safe)
-  const onCalculate = async () => {
-    if (!rows.length) return;
+  const saveActionPayroll = async () => {
+    if (!actionEmpId) return;
+    setActionSaving(true);
+    setActionSaveErr("");
 
-    // Recompute net = (basic+hra+allowances)-deductions for rows that already exist in payroll table
-    const toUpdate = rows
-      .filter((r) => r.payrollId)
-      .map((r) => ({
-        id: r.payrollId,
-        net_salary: Math.max(Number(r.basic || 0) + Number(r.hra || 0) + Number(r.allowances || 0) - Number(r.deductions || 0), 0),
-      }));
+    const payload = {
+      employee_id: actionEmpId,
+      month: periodKey,
+      basic_salary: toNum(actionForm.basic),
+      hra: toNum(actionForm.hra),
+      allowances: toNum(actionForm.allowances),
+      deductions: toNum(actionForm.deductions),
+      net_salary: actionNet,
+    };
 
-    if (!toUpdate.length) {
-      alert("No payroll rows to calculate for this month. Create payroll entries first.");
+    const res = await supabase.from(PAYROLL_TABLE).upsert(payload, { onConflict: "employee_id,month" });
+
+    if (res.error) {
+      setActionSaveErr(res.error.message);
+      setActionSaving(false);
       return;
     }
 
-    const updRes = await supabase.from(PAYROLL_TABLE).upsert(toUpdate, { onConflict: "id" });
-    if (updRes.error) return alert(updRes.error.message);
-
-    setBatchStatus("Draft");
+    setActionSaving(false);
     fetchPayrollData();
+    setActiveAction("");
   };
 
   const downloadCSV = () => {
@@ -449,6 +526,322 @@ export default function PayrollPage() {
     a.download = `payroll_${periodKey}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  /* ---------------- ✅ CREATE / EDIT PAYROLL MODAL ---------------- */
+  const openPayrollModal = (empId = "", fixed = false) => {
+    const fallbackEmp = empId || selectedEmpId || rows[0]?.empId || "";
+    const r = rows.find((x) => x.empId === fallbackEmp) || null;
+
+    setPayModalOpen(true);
+    setPayModalEmpId(fallbackEmp);
+    setPayFixedEmp(Boolean(fixed));
+
+    setPayForm({
+      basic: toNum(r?.basic),
+      hra: toNum(r?.hra),
+      allowances: toNum(r?.allowances),
+      deductions: toNum(r?.deductions),
+    });
+
+    setSaveErr("");
+  };
+
+  const closePayrollModal = () => {
+    if (saving) return;
+    setPayModalOpen(false);
+    setPayModalEmpId("");
+    setPayFixedEmp(false);
+    setSaveErr("");
+  };
+
+  const modalRow = useMemo(() => rows.find((x) => x.empId === payModalEmpId) || null, [rows, payModalEmpId]);
+
+  const modalGross = useMemo(() => toNum(payForm.basic) + toNum(payForm.hra) + toNum(payForm.allowances), [payForm]);
+  const modalNet = useMemo(() => Math.max(modalGross - toNum(payForm.deductions), 0), [modalGross, payForm]);
+
+  const savePayroll = async () => {
+    if (!payModalEmpId) return;
+
+    setSaving(true);
+    setSaveErr("");
+
+    const payload = {
+      employee_id: payModalEmpId,
+      month: periodKey,
+      basic_salary: toNum(payForm.basic),
+      hra: toNum(payForm.hra),
+      allowances: toNum(payForm.allowances),
+      deductions: toNum(payForm.deductions),
+      net_salary: modalNet,
+      // created_by: (optional) if you use supabase auth:
+      // created_by: (await supabase.auth.getUser()).data?.user?.id || null,
+    };
+
+    const res = await supabase.from(PAYROLL_TABLE).upsert(payload, { onConflict: "employee_id,month" });
+
+    if (res.error) {
+      setSaveErr(res.error.message);
+      setSaving(false);
+      return;
+    }
+
+    setSaving(false);
+    setPayModalOpen(false);
+    fetchPayrollData();
+  };
+
+  const renderStatDetails = () => {
+    if (!activeStat) return null;
+    return (
+      <div className="space-y-4">
+        {activeStat === "employees" ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-semibold text-slate-500">Total Employees</p>
+              <p className="mt-1 text-lg font-extrabold text-slate-900">{headerStats.totalEmployees}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+              <p className="text-[10px] font-semibold text-emerald-700">Processed</p>
+              <p className="mt-1 text-lg font-extrabold text-emerald-900">{headerBreakdown.processed}</p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
+              <p className="text-[10px] font-semibold text-amber-700">Pending</p>
+              <p className="mt-1 text-lg font-extrabold text-amber-900">{headerBreakdown.pending}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {activeStat === "gross" ? (
+          <div className="space-y-3">
+            {[
+              ["Basic Total", headerBreakdown.totalBasic],
+              ["HRA Total", headerBreakdown.totalHra],
+              ["Allowances Total", headerBreakdown.totalAllowances],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+                <p className="text-xs font-bold text-slate-900 tabular-nums">{inr(value)}</p>
+              </div>
+            ))}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Gross Salary</p>
+              <p className="text-sm font-extrabold text-emerald-700 tabular-nums">{inr(headerBreakdown.grossTotal)}</p>
+            </div>
+            <p className="text-[10px] text-slate-500">Gross = Basic + HRA + Allowances</p>
+          </div>
+        ) : null}
+
+        {activeStat === "deductions" ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Loan Deduction</p>
+              <p className="text-xs font-bold text-rose-600 tabular-nums">{inr(headerBreakdown.deductionSplit.loan)}</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Salary Advance Deduction</p>
+              <p className="text-xs font-bold text-rose-600 tabular-nums">{inr(headerBreakdown.deductionSplit.salaryAdvance)}</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Leave Deduction</p>
+              <p className="text-xs font-bold text-rose-600 tabular-nums">{inr(headerBreakdown.deductionSplit.leave)}</p>
+            </div>
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Total Deductions</p>
+              <p className="text-sm font-extrabold text-rose-600 tabular-nums">{inr(headerBreakdown.deductionsTotal)}</p>
+            </div>
+            <p className="text-[10px] text-slate-500">Total = Loan + Salary Advance + Leave</p>
+          </div>
+        ) : null}
+
+        {activeStat === "net" ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Gross Salary</p>
+              <p className="text-xs font-bold text-slate-900 tabular-nums">{inr(headerBreakdown.grossTotal)}</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Total Deductions</p>
+              <p className="text-xs font-bold text-rose-600 tabular-nums">{inr(headerBreakdown.deductionsTotal)}</p>
+            </div>
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-500">Total Net Pay</p>
+              <p className="text-sm font-extrabold text-emerald-700 tabular-nums">{inr(headerBreakdown.netTotal)}</p>
+            </div>
+            <p className="text-[10px] text-slate-500">Net = Gross - Deductions</p>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderActionDetails = () => {
+    if (!activeAction) return null;
+    if (activeAction === "create") {
+      return (
+        <div className="space-y-4">
+          <div>
+            <p className="text-[11px] font-bold text-slate-600 mb-1">Select Employee</p>
+            <select
+              value={actionEmpId}
+              onChange={(e) => setActionEmpId(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none"
+            >
+              <option value="" disabled>
+                Select...
+              </option>
+              {rows.map((r) => (
+                <option key={r.empId} value={r.empId}>
+                  {r.empId} - {r.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <FieldNum
+              label="Basic"
+              value={actionForm.basic}
+              onChange={(v) => setActionForm((p) => ({ ...p, basic: v }))}
+            />
+            <FieldNum label="HRA" value={actionForm.hra} onChange={(v) => setActionForm((p) => ({ ...p, hra: v }))} />
+            <FieldNum
+              label="Allowances"
+              value={actionForm.allowances}
+              onChange={(v) => setActionForm((p) => ({ ...p, allowances: v }))}
+            />
+            <FieldNum
+              label="Deductions"
+              value={actionForm.deductions}
+              onChange={(v) => setActionForm((p) => ({ ...p, deductions: v }))}
+            />
+          </div>
+
+          <button type="button" className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-slate-600">Gross Salary</p>
+              <p className="text-sm font-extrabold text-emerald-700 tabular-nums">{inr(actionGross)}</p>
+            </div>
+            <p className="mt-1 text-[10px] text-slate-500">Basic + HRA + Allowances</p>
+          </button>
+
+          <button type="button" className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-slate-600">Deductions</p>
+              <p className="text-sm font-extrabold text-rose-600 tabular-nums">{inr(actionForm.deductions || 0)}</p>
+            </div>
+            <div className="mt-2 space-y-1 text-[10px] text-slate-500">
+              <div className="flex items-center justify-between">
+                <span>Loan Deduction</span>
+                <span className="font-semibold text-slate-700">{inr(actionDeductionSplit.loan)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Salary Advance Deduction</span>
+                <span className="font-semibold text-slate-700">{inr(actionDeductionSplit.salaryAdvance)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Leave Deduction</span>
+                <span className="font-semibold text-slate-700">{inr(actionDeductionSplit.leave)}</span>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" className="w-full rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-left">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-emerald-900">Net Salary</p>
+              <p className="text-lg font-extrabold text-emerald-700 tabular-nums">{inr(actionNet)}</p>
+            </div>
+            <p className="mt-1 text-[10px] text-emerald-700">Net Salary = Gross Salary - Deductions</p>
+          </button>
+
+          {actionSaveErr ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-[11px] font-semibold text-rose-700">
+              {actionSaveErr}
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={saveActionPayroll}
+              disabled={actionSaving || !actionEmpId}
+              className="h-9 rounded-lg border border-emerald-600 bg-emerald-600 px-4 text-[11px] font-extrabold text-white hover:opacity-95 disabled:opacity-60"
+            >
+              {actionSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeAction === "preview") {
+      return (
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-500">Preview shows the salary breakup and net pay for the selected employee.</p>
+          <button
+            type="button"
+            onClick={() => {
+              if (actionEmpId) setSelectedEmpId(actionEmpId);
+              setTab("details");
+              setActiveAction("");
+            }}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Open Salary Details
+          </button>
+        </div>
+      );
+    }
+
+    if (activeAction === "approve") {
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <span className="text-[11px] font-semibold text-slate-500">Current Status</span>
+            <span className="text-[11px] font-bold text-slate-900">{batchStatus}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onApprove}
+            className="h-9 rounded-lg border border-blue-600 bg-blue-600 px-3 text-[11px] font-extrabold text-white hover:opacity-95"
+          >
+            Approve Payroll
+          </button>
+        </div>
+      );
+    }
+
+    if (activeAction === "payslip") {
+      return (
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-500">Generate payslips for the selected period once payroll is finalized.</p>
+          <button
+            type="button"
+            onClick={() => alert("Add payslip generation flow")}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Generate Payslip
+          </button>
+        </div>
+      );
+    }
+
+    if (activeAction === "download") {
+      return (
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-500">Download the payroll report for the current month.</p>
+          <button
+            type="button"
+            onClick={downloadCSV}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Download Reports
+          </button>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   return (
@@ -492,7 +885,10 @@ export default function PayrollPage() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown size={14} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/70" />
+                <ChevronDown
+                  size={14}
+                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/70"
+                />
               </div>
 
               <div className="relative">
@@ -507,7 +903,10 @@ export default function PayrollPage() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown size={14} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/70" />
+                <ChevronDown
+                  size={14}
+                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/70"
+                />
               </div>
             </div>
 
@@ -519,9 +918,7 @@ export default function PayrollPage() {
 
         {/* error / loading */}
         {errorMsg ? (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            {errorMsg}
-          </div>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{errorMsg}</div>
         ) : null}
 
         {/* Stat cards */}
@@ -532,6 +929,8 @@ export default function PayrollPage() {
             value={loading ? "…" : headerStats.totalEmployees}
             sub="Active this month"
             icon={UserRound}
+            active={activeStat === "employees"}
+            onClick={() => setActiveStat("employees")}
           />
           <StatCard
             variant="navy"
@@ -539,6 +938,8 @@ export default function PayrollPage() {
             value={loading ? "…" : inr(headerStats.grossTotal)}
             sub="Before deductions"
             icon={ReceiptIndianRupee}
+            active={activeStat === "gross"}
+            onClick={() => setActiveStat("gross")}
           />
           <StatCard
             variant="yellow"
@@ -546,6 +947,8 @@ export default function PayrollPage() {
             value={loading ? "…" : inr(headerStats.deductionsTotal)}
             sub="PF, ESI, Tax & more"
             icon={Percent}
+            active={activeStat === "deductions"}
+            onClick={() => setActiveStat("deductions")}
           />
           <StatCard
             variant="green"
@@ -553,6 +956,8 @@ export default function PayrollPage() {
             value={loading ? "…" : inr(headerStats.netTotal)}
             sub="Take-home salary"
             icon={Wallet}
+            active={activeStat === "net"}
+            onClick={() => setActiveStat("net")}
           />
         </div>
 
@@ -569,16 +974,14 @@ export default function PayrollPage() {
           </TabButton>
         </div>
 
-        {/* Employee Salary List (shown for Overview + Employee List) */}
+        {/* Employee Salary List */}
         {(tab === "overview" || tab === "list") && (
           <>
             <div className="rounded-xl border border-slate-200 bg-white">
               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-900">Employee Salary List</p>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    {loading ? "Loading…" : `${filteredRows.length} employee(s)`}
-                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">{loading ? "Loading…" : `${filteredRows.length} employee(s)`}</p>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -636,39 +1039,32 @@ export default function PayrollPage() {
                         <tr key={r.empId} className="border-t border-slate-100">
                           <td className="px-4 py-4 font-semibold text-slate-500">{r.empId}</td>
 
-                          {/* ✅ employee click => open Salary Details */}
                           <td className="px-4 py-4">
-                            <button
-                              type="button"
-                              onClick={() => openEmployeeDetails(r.empId)}
-                              className="text-left w-full"
-                              title="Open Salary Details"
-                            >
+                            <button type="button" onClick={() => openEmployeeDetails(r.empId)} className="text-left w-full" title="Open Salary Details">
                               <div className="font-bold text-slate-900">{r.name || "-"}</div>
                               <div className="text-[10px] font-semibold text-slate-400">{r.role || "-"}</div>
                             </button>
                           </td>
 
                           <td className="px-4 py-4 font-semibold text-slate-600">{r.department || "-"}</td>
-
                           <td className="px-4 py-4 font-semibold text-slate-900 tabular-nums">{inr(r.gross)}</td>
-
                           <td className="px-4 py-4 font-semibold text-rose-500 tabular-nums">{inr(r.deductions)}</td>
-
                           <td className="px-4 py-4 font-semibold text-slate-900 tabular-nums">{inr(r.net)}</td>
 
                           <td className="px-4 py-4">
                             <StatusPill status={r.status} />
                           </td>
 
+                          {/* ✅ actions: create/edit payroll */}
                           <td className="px-4 py-4">
                             <button
                               type="button"
-                              onClick={() => alert(`Actions - ${r.empId}\n(You can add edit modal here)`)}
-                              className="h-8 w-10 rounded-lg hover:bg-slate-50 grid place-items-center"
-                              title="Actions"
+                              onClick={() => openPayrollModal(r.empId, true)}
+                              className="h-8 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2 text-[11px] font-bold text-slate-700"
+                              title="Create / Edit Payroll"
                             >
                               <MoreHorizontal size={16} className="text-slate-500" />
+                              {r.status === "Processed" ? "Edit" : "Create"}
                             </button>
                           </td>
                         </tr>
@@ -681,7 +1077,7 @@ export default function PayrollPage() {
               <div className="p-4" />
             </div>
 
-            {/* ✅ Payroll Actions ONLY in Overview */}
+            {/* Payroll Actions ONLY in Overview */}
             {tab === "overview" && (
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <div className="flex items-center gap-2">
@@ -690,13 +1086,23 @@ export default function PayrollPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <ActionTile tone="navy" icon={ReceiptIndianRupee} title="Calculate Payroll" onClick={onCalculate} />
-                  <ActionTile tone="white" icon={Eye} title="Preview Salary" onClick={() => setTab("details")} />
-                  <ActionTile tone="blue" icon={ShieldCheck} title="Approve Payroll" onClick={onApprove} />
-                  <ActionTile tone="mint" icon={Play} title="Run Payroll" onClick={onRunPayroll} />
-                  <ActionTile tone="white" icon={FileText} title="Generate Payslip" onClick={() => alert("Add payslip generation flow")} />
-                  <ActionTile tone="white" icon={Download} title="Download Reports" onClick={downloadCSV} />
+                  <ActionTile
+                    tone="navy"
+                    icon={BadgeIndianRupee}
+                    title="Create / Edit Payroll"
+                    onClick={() => openActionDetails("create")}
+                  />
+                  <ActionTile tone="white" icon={Eye} title="Preview Salary" onClick={() => openActionDetails("preview")} />
+                  <ActionTile tone="blue" icon={ShieldCheck} title="Approve Payroll" onClick={() => openActionDetails("approve")} />
+                  <ActionTile
+                    tone="white"
+                    icon={FileText}
+                    title="Generate Payslip"
+                    onClick={() => openActionDetails("payslip")}
+                  />
+                  <ActionTile tone="white" icon={Download} title="Download Reports" onClick={() => openActionDetails("download")} />
                 </div>
+
               </div>
             )}
           </>
@@ -728,11 +1134,11 @@ export default function PayrollPage() {
                       <p className="text-sm font-bold text-slate-900">Salary Structure</p>
                       <button
                         type="button"
-                        onClick={() => alert("Add salary edit modal here (optional)")}
+                        onClick={() => openPayrollModal(selectedRow.empId, true)}
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
                       >
                         <FileText size={14} />
-                        Edit
+                        {selectedRow.status === "Processed" ? "Edit" : "Create"}
                       </button>
                     </div>
 
@@ -809,7 +1215,7 @@ export default function PayrollPage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  {/* Attendance & Leave (optional real data) */}
+                  {/* Attendance & Leave */}
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center gap-2">
                       <CalendarDays size={16} className="text-emerald-600" />
@@ -818,9 +1224,7 @@ export default function PayrollPage() {
 
                     <div className="mt-4 flex items-center justify-between">
                       <p className="text-[11px] font-semibold text-slate-500">Attendance Rate</p>
-                      <p className="text-[11px] font-bold text-slate-900">
-                        {attSummary ? `${attSummary.rate}%` : "-"}
-                      </p>
+                      <p className="text-[11px] font-bold text-slate-900">{attSummary ? `${attSummary.rate}%` : "-"}</p>
                     </div>
 
                     <div className="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden">
@@ -830,30 +1234,22 @@ export default function PayrollPage() {
                     <div className="mt-4 grid grid-cols-2 gap-3">
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <p className="text-[10px] font-semibold text-slate-500">Working Days</p>
-                        <p className="mt-1 text-sm font-extrabold text-slate-900">
-                          {attSummary ? attSummary.workingDays : "-"}
-                        </p>
+                        <p className="mt-1 text-sm font-extrabold text-slate-900">{attSummary ? attSummary.workingDays : "-"}</p>
                       </div>
 
                       <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
                         <p className="text-[10px] font-semibold text-emerald-700">Days Present</p>
-                        <p className="mt-1 text-sm font-extrabold text-emerald-900">
-                          {attSummary ? attSummary.presentDays : "-"}
-                        </p>
+                        <p className="mt-1 text-sm font-extrabold text-emerald-900">{attSummary ? attSummary.presentDays : "-"}</p>
                       </div>
 
                       <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
                         <p className="text-[10px] font-semibold text-indigo-700">Paid Leave</p>
-                        <p className="mt-1 text-sm font-extrabold text-indigo-900">
-                          {leaveSummary ? leaveSummary.paidLeave : "-"}
-                        </p>
+                        <p className="mt-1 text-sm font-extrabold text-indigo-900">{leaveSummary ? leaveSummary.paidLeave : "-"}</p>
                       </div>
 
                       <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
                         <p className="text-[10px] font-semibold text-amber-700">LOP Days</p>
-                        <p className="mt-1 text-sm font-extrabold text-amber-900">
-                          {leaveSummary ? leaveSummary.lopDays : "-"}
-                        </p>
+                        <p className="mt-1 text-sm font-extrabold text-amber-900">{leaveSummary ? leaveSummary.lopDays : "-"}</p>
                       </div>
                     </div>
 
@@ -863,7 +1259,7 @@ export default function PayrollPage() {
                     </div>
                   </div>
 
-                  {/* Bonus & Incentives (no columns in table -> show 0) */}
+                  {/* Bonus & Incentives */}
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center gap-2">
                       <Sparkles size={16} className="text-emerald-600" />
@@ -888,7 +1284,7 @@ export default function PayrollPage() {
                     </div>
                   </div>
 
-                  {/* Bank & Payment Details (from hrmss_profiles if available) */}
+                  {/* Bank & Payment Details */}
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
@@ -949,6 +1345,182 @@ export default function PayrollPage() {
           </div>
         )}
       </div>
+
+      {/* ✅ Modal */}
+      {payModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white border border-slate-200 shadow-xl overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-extrabold text-slate-900">Create / Edit Payroll</p>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Month: <b>{periodKey}</b>
+                  {modalRow ? (
+                    <>
+                      {" "}• Employee: <b>{modalRow.name || "-"}</b> ({modalRow.empId})
+                    </>
+                  ) : null}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closePayrollModal}
+                className="h-9 w-9 rounded-xl border border-slate-200 grid place-items-center hover:bg-slate-50"
+                title="Close"
+              >
+                <X size={16} className="text-slate-700" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {!payFixedEmp && (
+                <div>
+                  <p className="text-[11px] font-bold text-slate-600 mb-1">Select Employee</p>
+                  <select
+                    value={payModalEmpId}
+                    onChange={(e) => setPayModalEmpId(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none"
+                  >
+                    <option value="" disabled>
+                      Select…
+                    </option>
+                    {rows.map((r) => (
+                      <option key={r.empId} value={r.empId}>
+                        {r.empId} - {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <FieldNum
+                  label="Basic Salary"
+                  value={payForm.basic}
+                  onChange={(v) => setPayForm((p) => ({ ...p, basic: v }))}
+                />
+                <FieldNum label="HRA" value={payForm.hra} onChange={(v) => setPayForm((p) => ({ ...p, hra: v }))} />
+                <FieldNum
+                  label="Allowances"
+                  value={payForm.allowances}
+                  onChange={(v) => setPayForm((p) => ({ ...p, allowances: v }))}
+                />
+                <FieldNum
+                  label="Deductions"
+                  value={payForm.deductions}
+                  onChange={(v) => setPayForm((p) => ({ ...p, deductions: v }))}
+                />
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-slate-600">Gross</p>
+                  <p className="text-sm font-extrabold text-slate-900 tabular-nums">{inr(modalGross)}</p>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-slate-600">Net Pay</p>
+                  <p className="text-lg font-extrabold text-emerald-700 tabular-nums">{inr(modalNet)}</p>
+                </div>
+                <p className="mt-2 text-[10px] text-slate-500">
+                  Net = (Basic + HRA + Allowances) - Deductions
+                </p>
+              </div>
+
+              {saveErr ? (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-[11px] font-semibold text-rose-700">
+                  {saveErr}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closePayrollModal}
+                disabled={saving}
+                className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={savePayroll}
+                disabled={saving || !payModalEmpId}
+                className="h-10 rounded-xl border border-emerald-600 bg-emerald-600 px-4 text-xs font-extrabold text-white hover:opacity-95 disabled:opacity-60 inline-flex items-center gap-2"
+              >
+                <Save size={16} />
+                {saving ? "Saving…" : "Save Payroll"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeStat ? (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white border border-slate-200 shadow-xl overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-extrabold text-slate-900">
+                  {activeStat === "employees"
+                    ? "Employee Count Details"
+                    : activeStat === "gross"
+                      ? "Gross Salary Details"
+                      : activeStat === "deductions"
+                        ? "Deductions Details"
+                        : "Net Pay Details"}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">Click close to return to the dashboard.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveStat("")}
+                className="h-9 w-9 rounded-xl border border-slate-200 grid place-items-center hover:bg-slate-50"
+                title="Close"
+              >
+                <X size={16} className="text-slate-700" />
+              </button>
+            </div>
+            <div className="p-4 max-h-[70vh] overflow-y-auto">{renderStatDetails()}</div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeAction ? (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white border border-slate-200 shadow-xl overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-extrabold text-slate-900">
+                  {activeAction === "create"
+                    ? "Create Payroll"
+                    : activeAction === "preview"
+                      ? "Preview Salary"
+                      : activeAction === "approve"
+                        ? "Approve Payroll"
+                        : activeAction === "payslip"
+                          ? "Generate Payslip"
+                          : "Download Reports"}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">Use this panel to complete the action.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveAction("")}
+                className="h-9 w-9 rounded-xl border border-slate-200 grid place-items-center hover:bg-slate-50"
+                title="Close"
+              >
+                <X size={16} className="text-slate-700" />
+              </button>
+            </div>
+            <div className="p-4 max-h-[70vh] overflow-y-auto">{renderActionDetails()}</div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -967,5 +1539,20 @@ function CreditIcon() {
         <path d="M7 15h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
     </span>
+  );
+}
+
+function FieldNum({ label, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-bold text-slate-600">{label}</span>
+      <input
+        type="number"
+        min="0"
+        value={Number(value || 0)}
+        onChange={(e) => onChange(Number(e.target.value || 0))}
+        className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-100"
+      />
+    </label>
   );
 }
