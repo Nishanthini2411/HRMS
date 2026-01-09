@@ -1,5 +1,5 @@
 // src/pages/hr/HrNotifications.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -15,8 +15,12 @@ import {
   ShieldCheck,
   ChevronDown,
 } from "lucide-react";
+import { supabase } from "../../lib/supabaseClient";
 
 /* ===================== CONFIG ===================== */
+const TABLE = "hrmss_notifications";
+const AUDIENCE = ["hr", "all"];
+
 const ALLOWED_SOURCES = [
   "Employees",
   "Attendance",
@@ -60,6 +64,13 @@ function rgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+const formatTimeLabel = (value) => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString();
+};
+
 const tone = {
   success: {
     pill: "bg-emerald-50 text-emerald-700 ring-emerald-200",
@@ -90,54 +101,6 @@ const typeIcon = {
   info: Info,
 };
 
-/* ✅ Demo seed (allowed sources only) */
-const seed = [
-  {
-    id: "HR-N1",
-    title: "Policy Update",
-    detail: "New parental leave guideline effective Jan 1.",
-    type: "info",
-    time: "2h ago",
-    source: "LeaveManagement",
-    unread: true,
-  },
-  {
-    id: "HR-N2",
-    title: "Pending Approval",
-    detail: "3 leave requests need HR review today.",
-    type: "warning",
-    time: "Today, 09:10 AM",
-    source: "LeaveManagement",
-    unread: true,
-  },
-  {
-    id: "HR-N3",
-    title: "Document Expiry",
-    detail: "5 employee KYC docs expire this week.",
-    type: "warning",
-    time: "Yesterday",
-    source: "Documents",
-    unread: false,
-  },
-  {
-    id: "HR-N4",
-    title: "New employee onboarding",
-    detail: "EMP-021 added. Please complete HR checklist (documents + policy sign).",
-    type: "info",
-    time: "Yesterday",
-    source: "Employees",
-    unread: true,
-  },
-  {
-    id: "HR-N5",
-    title: "Upcoming birthday",
-    detail: "Anita Iyer’s birthday is in 4 days — schedule announcement.",
-    type: "info",
-    time: "2d ago",
-    source: "Birthday",
-    unread: false,
-  },
-];
 
 function Chip({ active, children, onClick }) {
   return (
@@ -201,8 +164,9 @@ function NotificationRow({
   onDelete,
   onGoToSource,
 }) {
-  const Icon = typeIcon[n.type] ?? Info;
-  const t = tone[n.type] ?? tone.info;
+  const typeKey = n.type || "info";
+  const Icon = typeIcon[typeKey] ?? Info;
+  const t = tone[typeKey] ?? tone.info;
 
   const [hover, setHover] = useState(false);
 
@@ -257,7 +221,7 @@ function NotificationRow({
                     t.pill
                   )}
                 >
-                  {n.type.toUpperCase()}
+                  {String(typeKey).toUpperCase()}
                 </span>
 
                 <span
@@ -335,7 +299,7 @@ function NotificationRow({
 
               <span className="text-[11px] text-slate-600 flex items-center gap-1">
                 <Clock3 size={12} />
-                {n.time}
+                {n.timeLabel || n.created_at}
               </span>
             </div>
           </div>
@@ -349,17 +313,51 @@ function NotificationRow({
 export default function HrNotifications() {
   const navigate = useNavigate();
 
-  const initial = useMemo(
-    () => seed.filter((x) => ALLOWED_SOURCES.includes(x.source)),
-    []
-  );
-  const [items, setItems] = useState(initial);
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState([]);
 
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
   const [source, setSource] = useState("All");
   const [status, setStatus] = useState("All");
   const [selected, setSelected] = useState(() => new Set());
+
+  const fetchNotifications = async () => {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("id,title,detail,type,source,route,unread,created_at")
+      .in("source", ALLOWED_SOURCES)
+      .in("audience", AUDIENCE)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Notifications fetch error:", error);
+      setItems([]);
+    } else {
+      const mapped = (data || []).map((n) => ({
+        id: n.id,
+        title: n.title || "-",
+        detail: n.detail || "",
+        type: n.type || "info",
+        source: n.source || "-",
+        route: n.route || "",
+        unread: n.unread ?? true,
+        created_at: n.created_at,
+        timeLabel: formatTimeLabel(n.created_at),
+      }));
+      setItems(mapped);
+    }
+
+    setSelected(new Set());
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -376,7 +374,8 @@ export default function HrNotifications() {
             ? n.unread === true
             : n.unread === false;
 
-        const text = `${n.title} ${n.detail} ${n.source} ${n.time}`.toLowerCase();
+        const timeText = n.timeLabel || n.created_at || "";
+        const text = `${n.title} ${n.detail} ${n.source} ${timeText}`.toLowerCase();
         const qOk = !query ? true : text.includes(query);
 
         return typeOk && sourceOk && statusOk && qOk;
@@ -407,11 +406,16 @@ export default function HrNotifications() {
   const clearSelection = () => setSelected(new Set());
   const selectAllFiltered = () => setSelected(() => new Set(filtered.map((x) => x.id)));
 
-  const markRead = (ids) => {
+  const markRead = async (ids) => {
     if (!ids?.length) return;
-    setItems((prev) =>
-      prev.map((x) => (ids.includes(x.id) ? { ...x, unread: false } : x))
-    );
+
+    const { error } = await supabase.from(TABLE).update({ unread: false }).in("id", ids);
+    if (error) {
+      console.error("Mark read error:", error);
+      return;
+    }
+
+    setItems((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, unread: false } : x)));
     setSelected((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => next.delete(id));
@@ -419,8 +423,15 @@ export default function HrNotifications() {
     });
   };
 
-  const remove = (ids) => {
+  const remove = async (ids) => {
     if (!ids?.length) return;
+
+    const { error } = await supabase.from(TABLE).delete().in("id", ids);
+    if (error) {
+      console.error("Delete error:", error);
+      return;
+    }
+
     setItems((prev) => prev.filter((x) => !ids.includes(x.id)));
     setSelected((prev) => {
       const next = new Set(prev);
@@ -594,7 +605,9 @@ export default function HrNotifications() {
       </div>
 
       {/* LIST */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="rounded-3xl border bg-white p-8 text-sm text-slate-600 shadow-sm">Loading notifications...</div>
+      ) : filtered.length === 0 ? (
         <EmptyState />
       ) : (
         <div className="space-y-3">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   MapPin,
   IdCard,
@@ -15,113 +15,185 @@ import {
 } from "lucide-react";
 import DocumentManager from "../../components/DocumentManager.jsx";
 import { getManagerSession } from "./managerData";
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
-const seedManagerProfile = {
-  name: "Priya Menon",
-  id: "MGR-01",
-  avatar: "https://i.pravatar.cc/150?img=32",
-
-  personal: {
-    dob: "1990-04-18",
-    gender: "Female",
-    maritalStatus: "Married",
-    bloodGroup: "A+",
-    personalEmail: "priya.menon@personalmail.com",
-    officialEmail: "priya.menon@hrms.example.com",
-    email: "priya.menon@hrms.example.com",
-    mobileNumber: "+91 90000 14001",
-    alternateContactNumber: "+91 90000 14002",
-    currentAddress: "Bangalore, IN",
-    permanentAddress: "Kochi, IN",
-    address: "Bangalore, IN",
-    phone: "+91 90000 14001",
-  },
-
-  job: {
-    employeeId: "MGR-01",
-    title: "Manager",
-    department: "Product Team",
-    employeeType: "Full-time",
-    manager: "Admin Head",
-    joiningDate: "12 Mar 2019",
-    workMode: "Hybrid",
-    location: "Bangalore, IN",
-  },
-
-  education: [
-    {
-      qualification: "MBA",
-      institution: "IIM Bangalore",
-      yearOfPassing: "2014",
-      specialization: "Operations",
-    },
-  ],
-
-  experience: [
-    {
-      organization: "Delta Systems",
-      designation: "Team Lead",
-      duration: "2014 - 2017",
-      reasonForLeaving: "Career growth",
-    },
-    {
-      organization: "Northwind Labs",
-      designation: "Manager",
-      duration: "2017 - Present",
-      reasonForLeaving: "-",
-    },
-  ],
-
-  skills: {
-    primarySkills: "Team Leadership, Delivery Planning",
-    secondarySkills: "Stakeholder Management, Hiring",
-    toolsTechnologies: "Jira, Confluence, Slack",
-  },
-
-  bank: {
-    accountHolderName: "Priya Menon",
-    bankName: "ICICI Bank",
-    accountNumber: "XXXXXX1188",
-    ifscCode: "ICIC0004321",
-    branch: "Bangalore",
-  },
-
-  emergencyContacts: [{ name: "Amit Menon", relation: "Spouse", phone: "+91 98888 14001" }],
-
-  idProofs: [
-    { type: "Aadhaar", number: "XXXX-XXXX-6543", status: "Verified" },
-    { type: "PAN", number: "ABCDE6789K", status: "Verified" },
-  ],
+const safeText = (v) => (v == null ? "" : String(v));
+const pick = (row, keys, fallback = "") => {
+  for (const k of keys) {
+    if (row && row[k] != null && String(row[k]).trim() !== "") return row[k];
+  }
+  return fallback;
 };
 
-function buildProfileFromSession(session) {
-  const team = session?.team ? `${session.team} Team` : seedManagerProfile.job.department;
-  const title = session?.role === "approver" ? "Manager (Approver)" : "Manager";
-  const name = session?.name || seedManagerProfile.name;
-  const id = session?.id || seedManagerProfile.id;
-  const email = session?.email || seedManagerProfile.personal.officialEmail;
+const buildFallbackProfile = (session) => {
+  const team = session?.team ? `${session.team} Team` : "-";
+  const title =
+    session?.role === "approver" || session?.access === "approver"
+      ? "Manager (Approver)"
+      : "Manager";
+  const name = session?.name || "Manager";
+  const id = session?.id || "";
+  const email = session?.email || "";
 
   return {
-    ...seedManagerProfile,
     name,
     id,
+    avatar: "",
     personal: {
-      ...(seedManagerProfile.personal || {}),
+      dob: "",
+      gender: "",
+      maritalStatus: "",
+      bloodGroup: "",
+      personalEmail: "",
       officialEmail: email,
       email,
+      mobileNumber: "",
+      alternateContactNumber: "",
+      currentAddress: "",
+      permanentAddress: "",
+      address: "",
+      phone: "",
     },
     job: {
-      ...(seedManagerProfile.job || {}),
       employeeId: id,
       title,
       department: team,
+      employeeType: "",
+      manager: "",
+      joiningDate: "",
+      workMode: "",
+      location: "",
     },
+    education: [],
+    experience: [],
+    skills: { primarySkills: "", secondarySkills: "", toolsTechnologies: "" },
+    bank: { accountHolderName: "", bankName: "", accountNumber: "", ifscCode: "", branch: "" },
+    emergencyContacts: [],
+    idProofs: [],
   };
-}
+};
+
+const mapDbToProfile = (data, fallback = {}) => {
+  if (!data) return buildFallbackProfile(fallback);
+
+  return {
+    name: data.full_name || fallback.name || "",
+    id: data.employee_id || data.user_id || fallback.id || "",
+    avatar: data.avatar_url || data.avatar || "",
+    personal: {
+      dob: data.dob || "",
+      gender: data.gender || "",
+      maritalStatus: data.marital_status || "",
+      bloodGroup: data.blood_group || "",
+      personalEmail: data.personal_email || data.email || "",
+      officialEmail: data.official_email || "",
+      email: data.official_email || data.email || "",
+      mobileNumber: data.mobile_number || data.phone || "",
+      alternateContactNumber: data.alternate_contact_number || "",
+      currentAddress: data.current_address || "",
+      permanentAddress: data.permanent_address || "",
+      address: data.current_address || data.address || "",
+      phone: data.mobile_number || data.phone || "",
+    },
+    job: {
+      employeeId: data.employee_id || data.user_id || fallback.id || "",
+      title: data.designation || data.job_title || data.role || "Manager",
+      department: data.department || fallback.team || "",
+      employeeType: data.employee_type || "",
+      manager: data.reporting_manager || data.manager || "",
+      joiningDate: data.joining_date || "",
+      workMode: data.work_mode || "",
+      location: data.work_location || data.location || "",
+    },
+    education: Array.isArray(data.education) ? data.education : [],
+    experience: Array.isArray(data.experience) ? data.experience : [],
+    skills: {
+      primarySkills: safeText(pick(data, ["primary_skills"], "")),
+      secondarySkills: safeText(pick(data, ["secondary_skills"], "")),
+      toolsTechnologies: safeText(pick(data, ["tools_technologies"], "")),
+    },
+    bank: {
+      accountHolderName: safeText(pick(data, ["account_holder_name"], "")),
+      bankName: safeText(pick(data, ["bank_name"], "")),
+      accountNumber: safeText(pick(data, ["account_number"], "")),
+      ifscCode: safeText(pick(data, ["ifsc_code"], "")),
+      branch: safeText(pick(data, ["branch"], "")),
+    },
+    emergencyContacts: data.emergency_name
+      ? [
+          {
+            name: data.emergency_name || "",
+            relation: data.emergency_relationship || "",
+            phone: data.emergency_contact_number || "",
+          },
+        ]
+      : Array.isArray(data.emergency_contacts)
+      ? data.emergency_contacts
+      : [],
+    idProofs: Array.isArray(data.id_proofs) ? data.id_proofs : [],
+  };
+};
 
 export default function ManagerProfile() {
   const session = getManagerSession();
-  const [profile, setProfile] = useState(() => buildProfileFromSession(session));
+  const [profile, setProfile] = useState(() => buildFallbackProfile(session));
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadProfile = async () => {
+      setLoading(true);
+      setErrorMsg("");
+
+      if (!isSupabaseConfigured || !session?.id) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const userId = String(session.id || "").trim();
+        if (!userId) {
+          setLoading(false);
+          return;
+        }
+
+        const { data: byUser, error: byUserErr } = await supabase
+          .from("hrmss_profiles")
+          .select("*")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (byUserErr) throw byUserErr;
+
+        let profileRow = byUser;
+        if (!profileRow) {
+          const { data: byEmp, error: byEmpErr } = await supabase
+            .from("hrmss_profiles")
+            .select("*")
+            .eq("employee_id", userId)
+            .maybeSingle();
+
+          if (byEmpErr) throw byEmpErr;
+          profileRow = byEmp;
+        }
+
+        const mapped = profileRow ? mapDbToProfile(profileRow, session) : buildFallbackProfile(session);
+        if (mounted) setProfile(mapped);
+      } catch (e) {
+        console.error("Manager profile load error:", e);
+        if (mounted) setErrorMsg(e?.message || "Failed to load profile");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, [session?.id]);
 
   const [editProfile, setEditProfile] = useState(false);
   const [addEmergency, setAddEmergency] = useState(false);
@@ -157,6 +229,16 @@ export default function ManagerProfile() {
           <Pencil size={16} /> Edit Profile
         </button>
       </div>
+
+      {loading ? (
+        <div className="rounded-2xl border bg-white p-4 text-sm text-slate-600 shadow-sm">
+          Loading profile...
+        </div>
+      ) : errorMsg ? (
+        <div className="rounded-2xl border bg-white p-4 text-sm text-rose-600 shadow-sm">
+          {errorMsg}
+        </div>
+      ) : null}
 
       <div className="rounded-2xl border bg-white p-6 flex gap-6 items-center">
         <div className="relative">

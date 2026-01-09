@@ -12,10 +12,20 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 
 /* ===================== CONFIG ===================== */
-/** ✅ Change ONLY if your table names differ */
+/** Change ONLY if your table names differ */
 const EMPLOYEES_TABLE = "hrmss_employees"; // <-- if your employees table name is different, change here
 const LEAVES_TABLE = "hrmss_leave_requests";
 const ADMIN_LEAVES_TABLE = "admin_leaves";
+const NOTIFICATIONS_TABLE = "hrmss_notifications";
+const ALLOWED_NOTIFICATION_SOURCES = [
+  "Employees",
+  "Attendance",
+  "LeaveManagement",
+  "Payroll",
+  "Documents",
+  "My Profile",
+  "Birthday",
+];
 
 /* ===================== HELPERS ===================== */
 const safeStr = (v) => (v == null ? "" : String(v));
@@ -43,6 +53,13 @@ const diffDaysInclusive = (from, to) => {
   return Number.isFinite(days) ? Math.max(days, 1) : 1;
 };
 
+const formatTimeLabel = (value) => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return safeStr(value);
+  return d.toLocaleString();
+};
+
 const AdminDashboard = () => {
   const navigate = useNavigate();
 
@@ -57,6 +74,9 @@ const AdminDashboard = () => {
   // (optional) keep existing UI for present + payroll; you can wire later
   const [presentToday, setPresentToday] = useState(0);
   const [payrollPending, setPayrollPending] = useState(0);
+
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
 
   const [dataError, setDataError] = useState("");
 
@@ -191,6 +211,30 @@ const AdminDashboard = () => {
       .slice(0, 3);
 
     setPendingLeaves(mergedApprovals);
+
+    // 3) Recent Notifications (Admin)
+    setNotificationsLoading(true);
+    const nRes = await supabase
+      .from(NOTIFICATIONS_TABLE)
+      .select("id,title,detail,type,source,created_at")
+      .in("source", ALLOWED_NOTIFICATION_SOURCES)
+      .in("audience", ["admin", "all"])
+      .order("created_at", { ascending: false })
+      .limit(4);
+
+    if (nRes.error) {
+      setNotifications([]);
+      setDataError((p) => `${p ? p + " | " : ""}Notifications: ${nRes.error.message}`);
+    } else {
+      const mapped = (nRes.data || []).map((n) => ({
+        id: safeStr(n.id),
+        type: safeStr(n.source || n.type || "Info"),
+        text: safeStr(n.title || n.detail || "-"),
+        time: formatTimeLabel(n.created_at),
+      }));
+      setNotifications(mapped);
+    }
+    setNotificationsLoading(false);
   };
 
   useEffect(() => {
@@ -204,7 +248,7 @@ const AdminDashboard = () => {
     totalEmployees > 0 ? Math.round((presentToday / totalEmployees) * 100) : 0
   );
 
-  // ✅ demo present list (keep as-is). You can wire attendance later.
+  //  demo present list (keep as-is). You can wire attendance later.
   const presentList = useMemo(
     () => [
       { id: "EMP-010", name: "Sahan Fernando", role: "Designer", department: "Creative", status: "Present" },
@@ -217,7 +261,7 @@ const AdminDashboard = () => {
     []
   );
 
-  // ✅ payroll pending list (keep as-is). You can wire payroll later.
+  //  payroll pending list (keep as-is). You can wire payroll later.
   const payrollPendingList = useMemo(
     () => [
       { id: "EMP-031", name: "Siva", role: "Engineer", department: "IT", status: "Payroll Pending" },
@@ -234,16 +278,6 @@ const AdminDashboard = () => {
       { label: "On Leave", value: 0, color: "bg-amber-500" },
     ],
     [presentToday, totalEmployees]
-  );
-
-  const notifications = useMemo(
-    () => [
-      { id: "NT-1", type: "Leave", text: "3 new leave requests received today.", time: "10 mins ago" },
-      { id: "NT-2", type: "Attendance", text: "5 employees haven't marked attendance.", time: "30 mins ago" },
-      { id: "NT-3", type: "Payroll", text: "Payroll run scheduled for 25th.", time: "2 hours ago" },
-      { id: "NT-4", type: "Reminder", text: "Update bank details for new employees.", time: "Yesterday" },
-    ],
-    []
   );
 
   const quickActions = [
@@ -521,27 +555,38 @@ const AdminDashboard = () => {
             </div>
 
             <div className="space-y-2 text-sm">
-              {notifications.map((note) => (
-                <button
-                  key={note.id}
-                  type="button"
-                  className="w-full text-left rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100 hover:bg-indigo-50 hover:ring-indigo-200 transition"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openView(`Notification • ${note.type}`, "notifications", [note]);
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-700">
-                      {note.type}
-                    </span>
-                    <span className="text-[11px] text-slate-400 inline-flex items-center gap-1">
-                      <Clock3 size={12} /> {note.time}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-600">{note.text}</p>
-                </button>
-              ))}
+              {notificationsLoading ? (
+                <div className="rounded-xl bg-slate-50 px-3 py-4 ring-1 ring-slate-100 text-xs text-slate-500">
+                  Loading notifications...
+                </div>
+              ) : notifications.length === 0 ? (
+                <div className="rounded-xl bg-slate-50 px-3 py-4 ring-1 ring-slate-100 text-xs text-slate-500">
+                  No notifications found.
+                </div>
+              ) : (
+                notifications.map((note) => (
+                  <button
+                    key={note.id}
+                    type="button"
+                    className="w-full text-left rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100 hover:bg-indigo-50 hover:ring-indigo-200 transition"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openView(`Notification - ${note.type}`, "notifications", [note]);
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700">
+                        {note.type}
+                      </span>
+                      <span className="text-[11px] text-slate-400 inline-flex items-center gap-1">
+                        <Clock3 size={12} /> {note.time}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-600">{note.text}</p>
+                  </button>
+                ))
+              )}
+
             </div>
           </div>
 

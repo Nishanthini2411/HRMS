@@ -1,5 +1,5 @@
 // ✅ src/pages/manager/ManagerDashboard.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
   CheckCircle2,
@@ -14,322 +14,181 @@ import {
   FileText,
 } from "lucide-react";
 
-import {
-  getManagerSession,
-  leaveRequests,
-  payrollRecords,
-  payslipRecords,
-  teamMembers,
-} from "./managerData";
+import { supabase } from "../../lib/supabaseClient";
+import { getManagerSession } from "./managerData";
 
-const companyEmployees = [
-  {
-    id: "EMP-1045",
-    name: "Sneha Iyer",
-    avatar: "https://i.pravatar.cc/150?img=47",
+/* ===================== CONFIG ===================== */
+const EMP_TABLE = "hrmss_profiles";
+const LEAVE_TABLE = "hrmss_leave_requests";
+const PAYROLL_TABLE = "hrmss_payroll_records";
+const PAYROLL_TABLE_FALLBACK = "hrmss_payroll";
+const PAYSLIP_TABLE = "hrmss_payslip_records";
+
+/* ===================== HELPERS ===================== */
+const safeText = (v) => (v == null ? "" : String(v));
+const pick = (row, keys, fallback = "") => {
+  for (const k of keys) {
+    if (row && row[k] != null && String(row[k]).trim() !== "") return row[k];
+  }
+  return fallback;
+};
+
+const formatDate = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString();
+};
+
+const formatMonth = (value) => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("en-US", { month: "short", year: "numeric" });
+};
+
+const formatRange = (from, to) => {
+  if (!from && !to) return "-";
+  if (!to || to === from) return formatDate(from);
+  return `${formatDate(from)} - ${formatDate(to)}`;
+};
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const isActiveLeave = (leave) => {
+  const status = safeText(leave.status).toLowerCase();
+  const approved =
+    status === "approved" || status === "on leave" || status.startsWith("approved");
+  if (!approved) return false;
+
+  const from = leave.from_date || leave.fromDate;
+  const to = leave.to_date || leave.toDate || leave.from_date || leave.fromDate;
+  const fromDate = parseDate(from);
+  const toDate = parseDate(to);
+  if (!fromDate || !toDate) return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today >= fromDate && today <= toDate;
+};
+
+const normalizeEmployee = (row) => {
+  return {
+    id: safeText(pick(row, ["employee_id", "user_id", "id", "manager_code"], "")),
+    name: safeText(pick(row, ["full_name", "name"], "Unknown")),
+    avatar: safeText(pick(row, ["avatar_url", "avatar"], "")),
+
     personal: {
-      dob: "1994-03-12",
-      gender: "Female",
-      maritalStatus: "Single",
-      bloodGroup: "B+",
-      personalEmail: "sneha.iyer@example.com",
-      officialEmail: "sneha.iyer@company.com",
-      mobileNumber: "+91 98765 11111",
-      alternateContactNumber: "",
-      currentAddress: "Bangalore, IN",
-      permanentAddress: "Bangalore, IN",
+      dob: safeText(pick(row, ["dob"], "")),
+      gender: safeText(pick(row, ["gender"], "")),
+      maritalStatus: safeText(pick(row, ["marital_status"], "")),
+      bloodGroup: safeText(pick(row, ["blood_group"], "")),
+      personalEmail: safeText(pick(row, ["personal_email", "email"], "")),
+      officialEmail: safeText(pick(row, ["official_email"], "")),
+      mobileNumber: safeText(pick(row, ["mobile_number", "phone"], "")),
+      alternateContactNumber: safeText(pick(row, ["alternate_contact_number"], "")),
+      currentAddress: safeText(pick(row, ["current_address"], "")),
+      permanentAddress: safeText(pick(row, ["permanent_address"], "")),
+      address: safeText(pick(row, ["current_address", "address"], "")),
+      email: safeText(pick(row, ["official_email", "email"], "")),
+      phone: safeText(pick(row, ["mobile_number", "phone"], "")),
     },
+
     job: {
-      employeeId: "EMP-1045",
-      title: "Product Designer",
-      department: "Product",
-      manager: "Priya Menon",
-      joiningDate: "2022-04-15",
-      workMode: "Hybrid",
-      location: "Bangalore, IN",
+      employeeId: safeText(pick(row, ["employee_id", "user_id", "id"], "")),
+      title: safeText(pick(row, ["designation", "job_title", "role", "position"], "-")),
+      department: safeText(pick(row, ["department", "team"], "-")),
+      manager: safeText(pick(row, ["reporting_manager", "manager"], "-")),
+      joiningDate: safeText(pick(row, ["joining_date"], "-")),
+      workMode: safeText(pick(row, ["work_mode"], "-")),
+      location: safeText(pick(row, ["work_location", "location"], "-")),
     },
-    emergencyContacts: [
-      { name: "Anita Iyer", relation: "Mother", phone: "+91 98765 22222" },
-    ],
-    idProofs: [
-      { type: "Aadhaar", number: "XXXX-XXXX-1234", status: "Verified" },
-      { type: "PAN", number: "ABCDE1234F", status: "Pending" },
-    ],
-    education: [
-      {
-        qualification: "B.Des",
-        institution: "NID",
-        yearOfPassing: "2016",
-        specialization: "Interaction Design",
-      },
-    ],
-    experience: [
-      {
-        organization: "DesignWorks",
-        designation: "UI Designer",
-        duration: "2016 - 2019",
-        reasonForLeaving: "Career growth",
-      },
-    ],
+
+    education: Array.isArray(row.education) ? row.education : [],
+    experience: Array.isArray(row.experience) ? row.experience : [],
+
     skills: {
-      primarySkills: "UI/UX, Figma",
-      secondarySkills: "Prototyping, UX Research",
-      toolsTechnologies: "Figma, FigJam, Miro",
+      primarySkills: safeText(pick(row, ["primary_skills"], "")),
+      secondarySkills: safeText(pick(row, ["secondary_skills"], "")),
+      toolsTechnologies: safeText(pick(row, ["tools_technologies"], "")),
     },
+
     bank: {
-      accountHolderName: "Sneha Iyer",
-      bankName: "HDFC Bank",
-      accountNumber: "XXXXXX4521",
-      ifscCode: "HDFC0001234",
-      branch: "Bangalore",
-      paymentMode: "Bank Transfer",
+      accountHolderName: safeText(pick(row, ["account_holder_name"], "")),
+      bankName: safeText(pick(row, ["bank_name"], "")),
+      accountNumber: safeText(pick(row, ["account_number"], "")),
+      ifscCode: safeText(pick(row, ["ifsc_code"], "")),
+      branch: safeText(pick(row, ["branch"], "")),
+      paymentMode: safeText(pick(row, ["payment_mode"], "")),
     },
-  },
-  {
-    id: "EMP-1046",
-    name: "Ritwik Sharma",
-    avatar: "https://i.pravatar.cc/150?img=12",
-    personal: {
-      dob: "1991-09-08",
-      gender: "Male",
-      maritalStatus: "Married",
-      bloodGroup: "O+",
-      personalEmail: "ritwik.sharma@example.com",
-      officialEmail: "ritwik.sharma@company.com",
-      mobileNumber: "+91 98765 33333",
-      alternateContactNumber: "",
-      currentAddress: "Pune, IN",
-      permanentAddress: "Pune, IN",
-    },
-    job: {
-      employeeId: "EMP-1046",
-      title: "Backend Engineer",
-      department: "Engineering",
-      manager: "Priya Menon",
-      joiningDate: "2020-11-02",
-      workMode: "Remote",
-      location: "Pune, IN",
-    },
-    emergencyContacts: [
-      { name: "Ravi Sharma", relation: "Brother", phone: "+91 98765 44444" },
-    ],
-    idProofs: [
-      { type: "Aadhaar", number: "XXXX-XXXX-5678", status: "Verified" },
-    ],
-    education: [
-      {
-        qualification: "B.Tech",
-        institution: "IIT",
-        yearOfPassing: "2014",
-        specialization: "Computer Science",
-      },
-    ],
-    experience: [
-      {
-        organization: "TechNova",
-        designation: "Software Engineer",
-        duration: "2014 - 2018",
-        reasonForLeaving: "Better role",
-      },
-    ],
-    skills: {
-      primarySkills: "Node.js, PostgreSQL",
-      secondarySkills: "AWS, Docker",
-      toolsTechnologies: "AWS, Docker, GitHub Actions",
-    },
-    bank: {
-      accountHolderName: "Ritwik Sharma",
-      bankName: "ICICI Bank",
-      accountNumber: "XXXXXX8899",
-      ifscCode: "ICIC0009876",
-      branch: "Pune",
-      paymentMode: "Bank Transfer",
-    },
-  },
-  {
-    id: "EMP-1047",
-    name: "Neha George",
-    avatar: "https://i.pravatar.cc/150?img=32",
-    personal: {
-      dob: "1993-01-21",
-      gender: "Female",
-      maritalStatus: "Single",
-      bloodGroup: "A+",
-      personalEmail: "neha.george@example.com",
-      officialEmail: "neha.george@company.com",
-      mobileNumber: "+91 98765 55555",
-      alternateContactNumber: "",
-      currentAddress: "Hyderabad, IN",
-      permanentAddress: "Hyderabad, IN",
-    },
-    job: {
-      employeeId: "EMP-1047",
-      title: "QA Analyst",
-      department: "Quality",
-      manager: "Arun Dev",
-      joiningDate: "2021-03-18",
-      workMode: "Onsite",
-      location: "Hyderabad, IN",
-    },
-    emergencyContacts: [
-      { name: "Lina George", relation: "Mother", phone: "+91 98765 66666" },
-    ],
-    idProofs: [
-      { type: "PAN", number: "PQRSX1234Y", status: "Verified" },
-    ],
-    education: [
-      {
-        qualification: "B.Sc",
-        institution: "Osmania University",
-        yearOfPassing: "2015",
-        specialization: "IT",
-      },
-    ],
-    experience: [
-      {
-        organization: "QA Labs",
-        designation: "QA Engineer",
-        duration: "2015 - 2020",
-        reasonForLeaving: "Relocation",
-      },
-    ],
-    skills: {
-      primarySkills: "Manual Testing, API Testing",
-      secondarySkills: "Automation Basics",
-      toolsTechnologies: "Postman, Jira",
-    },
-    bank: {
-      accountHolderName: "Neha George",
-      bankName: "SBI",
-      accountNumber: "XXXXXX7788",
-      ifscCode: "SBIN0001111",
-      branch: "Hyderabad",
-      paymentMode: "Bank Transfer",
-    },
-  },
-  {
-    id: "EMP-1048",
-    name: "Dhruv Pai",
-    avatar: "https://i.pravatar.cc/150?img=18",
-    personal: {
-      dob: "1992-12-04",
-      gender: "Male",
-      maritalStatus: "Married",
-      bloodGroup: "O-",
-      personalEmail: "dhruv.pai@example.com",
-      officialEmail: "dhruv.pai@company.com",
-      mobileNumber: "+91 98765 77777",
-      alternateContactNumber: "",
-      currentAddress: "Chennai, IN",
-      permanentAddress: "Chennai, IN",
-    },
-    job: {
-      employeeId: "EMP-1048",
-      title: "Frontend Engineer",
-      department: "Engineering",
-      manager: "Arun Dev",
-      joiningDate: "2019-08-22",
-      workMode: "Hybrid",
-      location: "Chennai, IN",
-    },
-    emergencyContacts: [
-      { name: "Meera Pai", relation: "Spouse", phone: "+91 98765 88888" },
-    ],
-    idProofs: [
-      { type: "Aadhaar", number: "XXXX-XXXX-9911", status: "Verified" },
-    ],
-    education: [
-      {
-        qualification: "B.E",
-        institution: "Anna University",
-        yearOfPassing: "2014",
-        specialization: "Computer Science",
-      },
-    ],
-    experience: [
-      {
-        organization: "WebLabs",
-        designation: "Frontend Developer",
-        duration: "2014 - 2018",
-        reasonForLeaving: "New role",
-      },
-    ],
-    skills: {
-      primarySkills: "React, TypeScript",
-      secondarySkills: "UX, Testing",
-      toolsTechnologies: "React, Vite, Jest",
-    },
-    bank: {
-      accountHolderName: "Dhruv Pai",
-      bankName: "Axis Bank",
-      accountNumber: "XXXXXX9900",
-      ifscCode: "UTIB0002222",
-      branch: "Chennai",
-      paymentMode: "Bank Transfer",
-    },
-  },
-  {
-    id: "EMP-1049",
-    name: "Bhavana Kulkarni",
-    avatar: "https://i.pravatar.cc/150?img=25",
-    personal: {
-      dob: "1989-07-30",
-      gender: "Female",
-      maritalStatus: "Married",
-      bloodGroup: "AB+",
-      personalEmail: "bhavana.kulkarni@example.com",
-      officialEmail: "bhavana.kulkarni@company.com",
-      mobileNumber: "+91 98765 99999",
-      alternateContactNumber: "",
-      currentAddress: "Bangalore, IN",
-      permanentAddress: "Bangalore, IN",
-    },
-    job: {
-      employeeId: "EMP-1049",
-      title: "Product Manager",
-      department: "Product",
-      manager: "Priya Menon",
-      joiningDate: "2018-06-12",
-      workMode: "Hybrid",
-      location: "Bangalore, IN",
-    },
-    emergencyContacts: [
-      { name: "Arun Kulkarni", relation: "Spouse", phone: "+91 98765 10101" },
-    ],
-    idProofs: [
-      { type: "PAN", number: "ABCDE1234F", status: "Verified" },
-    ],
-    education: [
-      {
-        qualification: "MBA",
-        institution: "IIM",
-        yearOfPassing: "2012",
-        specialization: "Product Management",
-      },
-    ],
-    experience: [
-      {
-        organization: "ProductX",
-        designation: "Product Owner",
-        duration: "2012 - 2017",
-        reasonForLeaving: "Leadership role",
-      },
-    ],
-    skills: {
-      primarySkills: "Product Strategy, Roadmaps",
-      secondarySkills: "Analytics, UX",
-      toolsTechnologies: "Jira, Notion",
-    },
-    bank: {
-      accountHolderName: "Bhavana Kulkarni",
-      bankName: "Kotak Bank",
-      accountNumber: "XXXXXX3311",
-      ifscCode: "KKBK0003333",
-      branch: "Bangalore",
-      paymentMode: "Bank Transfer",
-    },
-  },
-];
+
+    emergencyContacts: row.emergency_name
+      ? [
+          {
+            name: safeText(row.emergency_name),
+            relation: safeText(row.emergency_relationship),
+            phone: safeText(row.emergency_contact_number),
+          },
+        ]
+      : Array.isArray(row.emergency_contacts)
+      ? row.emergency_contacts
+      : [],
+
+    idProofs: Array.isArray(row.id_proofs) ? row.id_proofs : [],
+  };
+};
+
+const normalizeLeave = (row) => {
+  const from = pick(row, ["from_date", "from"], "");
+  const to = pick(row, ["to_date", "to"], "");
+  const dates = pick(row, ["leave_dates", "dates"], "");
+  const leaveDates = dates || formatRange(from, to);
+
+  return {
+    id: safeText(pick(row, ["id", "req_id", "request_id"], "")),
+    employeeId: safeText(pick(row, ["employee_id", "owner_id", "emp_id"], "")),
+    employee: safeText(pick(row, ["employee_name", "owner_name", "name"], "Unknown")),
+    type: safeText(pick(row, ["leave_type", "type"], "-")),
+    dates: safeText(leaveDates || "-"),
+    reason: safeText(pick(row, ["reason"], "")),
+    status: safeText(pick(row, ["status"], "Pending")),
+    handover: safeText(pick(row, ["handover", "handover_to"], "")),
+    from_date: from,
+    to_date: to,
+  };
+};
+
+const normalizePayroll = (row) => {
+  const month = pick(row, ["month", "period", "payroll_month", "pay_month"], "");
+  return {
+    month: safeText(month || formatMonth(row.created_at)),
+    status: safeText(pick(row, ["status"], "-")),
+    remarks: safeText(pick(row, ["remarks", "note", "description", "summary"], "")),
+    created_at: row.created_at,
+  };
+};
+
+const normalizePayslip = (row) => {
+  const month = pick(row, ["month", "period", "payroll_month", "pay_month"], "");
+  const published =
+    row.published ??
+    row.is_published ??
+    row.payslip_published ??
+    row.isPublished ??
+    false;
+  return {
+    month: safeText(month || formatMonth(row.created_at)),
+    published: Boolean(published),
+    note: safeText(pick(row, ["note", "remarks", "description"], "")),
+    created_at: row.created_at,
+  };
+};
 
 /* ===================== small UI blocks ===================== */
 const toneMap = {
@@ -428,24 +287,82 @@ function Modal({ open, title, onClose, children }) {
 /* ===================== main ===================== */
 export default function ManagerDashboard() {
   const session = getManagerSession();
-  const approver = session.role === "approver";
+  const approver = session.role === "approver" || session.access === "approver";
 
   // ✅ even if managerData has "Alpha squad" / "Alpha — squad", it will remove it
   const teamLabel = (session.team || "")
     .replace(/\s*[-—]?\s*squad\s*$/i, "")
     .trim();
 
-  const onLeave = useMemo(
-    () => teamMembers.filter((m) => m.status === "On Leave"),
-    []
-  );
+  const [employees, setEmployees] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [payrollRecords, setPayrollRecords] = useState([]);
+  const [payslipRecords, setPayslipRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const pending = useMemo(
-    () => leaveRequests.filter((l) => l.status === "Pending"),
-    []
-  );
+  const fetchAll = async () => {
+    setLoading(true);
+    setErrorMsg("");
 
-  // ✅ dashboard | employees | leave | approvals | payroll
+    try {
+      const { data: empRows, error: empErr } = await supabase
+        .from(EMP_TABLE)
+        .select("*")
+        .order("full_name", { ascending: true });
+
+      if (empErr) throw new Error(`Employees load failed: ${empErr.message}`);
+      setEmployees((empRows || []).map(normalizeEmployee));
+
+      const { data: leaveRows, error: leaveErr } = await supabase
+        .from(LEAVE_TABLE)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (leaveErr) {
+        setLeaveRequests([]);
+      } else {
+        setLeaveRequests((leaveRows || []).map(normalizeLeave));
+      }
+
+      const payrollPrimary = await supabase
+        .from(PAYROLL_TABLE)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (payrollPrimary.error) {
+        const payrollFallback = await supabase
+          .from(PAYROLL_TABLE_FALLBACK)
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        setPayrollRecords((payrollFallback.data || []).map(normalizePayroll));
+      } else {
+        setPayrollRecords((payrollPrimary.data || []).map(normalizePayroll));
+      }
+
+      const { data: payslipRows, error: payslipErr } = await supabase
+        .from(PAYSLIP_TABLE)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (payslipErr) {
+        setPayslipRecords([]);
+      } else {
+        setPayslipRecords((payslipRows || []).map(normalizePayslip));
+      }
+    } catch (e) {
+      setErrorMsg(e?.message || "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [view, setView] = useState("dashboard");
   const [employeeQuery, setEmployeeQuery] = useState("");
 
@@ -455,13 +372,45 @@ export default function ManagerDashboard() {
     setModal({ open: true, title, payload });
   const closeModal = () => setModal({ open: false, title: "", payload: null });
 
+  const teamMembers = useMemo(() => {
+    const activeLeaveMap = new Map();
+
+    for (const leave of leaveRequests) {
+      if (!leave.employeeId || activeLeaveMap.has(leave.employeeId)) continue;
+      if (isActiveLeave(leave)) activeLeaveMap.set(leave.employeeId, leave);
+    }
+
+    return employees.map((e) => {
+      const activeLeave = activeLeaveMap.get(e.id);
+      return {
+        id: e.id,
+        name: e.name,
+        role: e.job?.title || "-",
+        status: activeLeave ? "On Leave" : "Available",
+        leaveType: activeLeave?.type || "",
+        leaveDates: activeLeave?.dates || "",
+        location: e.job?.location || e.personal?.currentAddress || "-",
+      };
+    });
+  }, [employees, leaveRequests]);
+
+  const onLeave = useMemo(
+    () => teamMembers.filter((m) => m.status === "On Leave"),
+    [teamMembers]
+  );
+
+  const pending = useMemo(
+    () => leaveRequests.filter((l) => safeText(l.status).toLowerCase() === "pending"),
+    [leaveRequests]
+  );
+
   const teamMemberMap = useMemo(() => {
     return new Map(teamMembers.map((m) => [m.id, m]));
-  }, []);
+  }, [teamMembers]);
 
   const employeesList = useMemo(() => {
     const q = employeeQuery.trim().toLowerCase();
-    return companyEmployees
+    return employees
       .map((emp) => {
         const member = teamMemberMap.get(emp.id);
         return {
@@ -478,10 +427,10 @@ export default function ManagerDashboard() {
         const text = `${emp.name} ${emp.id} ${emp.job?.department || ""} ${emp.job?.title || ""}`.toLowerCase();
         return text.includes(q);
       });
-  }, [employeeQuery, teamMemberMap]);
+  }, [employeeQuery, teamMemberMap, employees]);
 
   const openProfile = (member, options = {}) => {
-    const profile = companyEmployees.find((e) => e.id === member.id) || member;
+    const profile = employees.find((e) => e.id === member.id) || member;
     openModal(profile.name || member.name, {
       kind: "profile",
       profile,
@@ -492,6 +441,33 @@ export default function ManagerDashboard() {
       leaveDates: member.leaveDates || "",
       showLeave: Boolean(options.showLeave),
     });
+  };
+
+  const renderStatusPanel = () => {
+    if (loading) {
+      return (
+        <div className="rounded-2xl border bg-white p-5 text-sm text-slate-600 shadow-sm">
+          Loading data...
+        </div>
+      );
+    }
+
+    if (errorMsg) {
+      return (
+        <div className="rounded-2xl border bg-white p-5 text-sm text-rose-600 shadow-sm">
+          <div>{errorMsg}</div>
+          <button
+            type="button"
+            onClick={fetchAll}
+            className="mt-3 inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   /* ===================== Views ===================== */
@@ -529,6 +505,7 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
+      {loading || errorMsg ? renderStatusPanel() : (<>
       {/* ✅ Clickable Stat Cards -> opens view */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard
@@ -765,24 +742,32 @@ export default function ManagerDashboard() {
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={() =>
-                openModal(`Payslips — ${payslipRecords[0].month}`, {
-                  kind: "payslip",
-                  ...payslipRecords[0],
-                })
-              }
-              className="bg-white/10 hover:bg-white/15 rounded-xl p-3 text-xs text-slate-100 flex items-center justify-between transition"
-            >
-              <span>Payslips published for {payslipRecords[0].month}</span>
-              <span className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-100 px-2 py-1 rounded-full">
-                <Eye size={12} /> View
-              </span>
-            </button>
+            {payslipRecords.length > 0 ? (
+              <button
+                type="button"
+                onClick={() =>
+                  openModal(`Payslips - ${payslipRecords[0].month}`, {
+                    kind: "payslip",
+                    ...payslipRecords[0],
+                  })
+                }
+                className="bg-white/10 hover:bg-white/15 rounded-xl p-3 text-xs text-slate-100 flex items-center justify-between transition"
+              >
+                <span>Payslips published for {payslipRecords[0].month}</span>
+                <span className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-100 px-2 py-1 rounded-full">
+                  <Eye size={12} /> View
+                </span>
+              </button>
+            ) : (
+              <div className="bg-white/10 rounded-xl p-3 text-xs text-slate-200">
+                No payslips found.
+              </div>
+            )}
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 
@@ -811,7 +796,7 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 items-start">
         {employeesList.map((m) => (
           <button
             key={m.id}
